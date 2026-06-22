@@ -351,12 +351,12 @@ public class BenchmarkService {
         long[] sp = Arrays.copyOf(pub, sent); Arrays.sort(sp);
         long[] se = Arrays.copyOf(e2e, sent); Arrays.sort(se);
         return new BenchmarkProgress(broker, false, sent, total,
-                toMs(sp[(int)(sent * 0.50)]),
-                toMs(sp[(int)(sent * 0.99)]),
+                toMs(sp[clamp(sent, 0.50)]),
+                toMs(sp[clamp(sent, 0.99)]),
                 toMs(sp[clamp(sent, 0.999)]),
                 sent / (elapsedNs / 1e9),
-                toMs(se[(int)(sent * 0.50)]),
-                toMs(se[(int)(sent * 0.99)]),
+                toMs(se[clamp(sent, 0.50)]),
+                toMs(se[clamp(sent, 0.99)]),
                 toMs(se[clamp(sent, 0.999)]),
                 run, totalRuns, 0, 0);
     }
@@ -369,12 +369,12 @@ public class BenchmarkService {
         long[] se = hasE2e ? e2e.clone() : new long[n];
         if (hasE2e) Arrays.sort(se);
         return new BenchmarkProgress(broker, true, n, n,
-                toMs(sp[(int)(n * 0.50)]),
-                toMs(sp[(int)(n * 0.99)]),
+                toMs(sp[clamp(n, 0.50)]),
+                toMs(sp[clamp(n, 0.99)]),
                 toMs(sp[clamp(n, 0.999)]),
                 n / (elapsedNs / 1e9),
-                hasE2e ? toMs(se[(int)(n * 0.50)])  : 0,
-                hasE2e ? toMs(se[(int)(n * 0.99)])  : 0,
+                hasE2e ? toMs(se[clamp(n, 0.50)])  : 0,
+                hasE2e ? toMs(se[clamp(n, 0.99)])  : 0,
                 hasE2e ? toMs(se[clamp(n, 0.999)]) : 0,
                 run, totalRuns, 0, 0);
     }
@@ -390,12 +390,12 @@ public class BenchmarkService {
         long[] sp = pub.clone(); Arrays.sort(sp);
         long[] se = e2e.clone(); Arrays.sort(se);
         return new BenchmarkResult.BrokerMetrics(n,
-                toMs(sp[(int)(n * 0.50)]),
-                toMs(sp[(int)(n * 0.99)]),
+                toMs(sp[clamp(n, 0.50)]),
+                toMs(sp[clamp(n, 0.99)]),
                 toMs(sp[clamp(n, 0.999)]),
                 n / (elapsedNs / 1e9),
-                toMs(se[(int)(n * 0.50)]),
-                toMs(se[(int)(n * 0.99)]),
+                toMs(se[clamp(n, 0.50)]),
+                toMs(se[clamp(n, 0.99)]),
                 toMs(se[clamp(n, 0.999)]));
     }
 
@@ -409,7 +409,7 @@ public class BenchmarkService {
         long sum = 0; for (long l : lat) sum += l; return sum;
     }
 
-    private static int clamp(int n, double pct) { return Math.max(0, (int)(n * pct) - 1); }
+    private static int clamp(int n, double pct) { return Math.min(n - 1, (int)(n * pct)); }
     private static double toMs(long nanos) { return nanos / 1_000_000.0; }
 
     private byte[] buildPayload(int size) throws Exception {

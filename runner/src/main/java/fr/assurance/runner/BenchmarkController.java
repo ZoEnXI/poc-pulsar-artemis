@@ -10,12 +10,21 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Controller
 public class BenchmarkController {
 
     private final BenchmarkService service;
     private final ObjectMapper mapper;
+
+    private static final AtomicInteger THREAD_COUNT = new AtomicInteger();
+    private static final ThreadFactory DAEMON_FACTORY = r -> {
+        Thread t = new Thread(r, "benchmark-" + THREAD_COUNT.incrementAndGet());
+        t.setDaemon(true);
+        return t;
+    };
 
     public BenchmarkController(BenchmarkService service, ObjectMapper mapper) {
         this.service = service;
@@ -58,7 +67,7 @@ public class BenchmarkController {
                 Math.max(1, producerCount), Math.max(1, Math.min(runs, 5)));
         SseEmitter emitter = new SseEmitter(600_000L);
 
-        Executors.newSingleThreadExecutor().submit(() -> {
+        Executors.newSingleThreadExecutor(DAEMON_FACTORY).submit(() -> {
             try {
                 service.runStreaming(params, progress -> {
                     try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(progress))); }
@@ -82,7 +91,7 @@ public class BenchmarkController {
         BenchmarkParams params = new BenchmarkParams(warmup, messages, 0, artemis, pulsar, 1, 1);
         SseEmitter emitter = new SseEmitter(600_000L);
 
-        Executors.newSingleThreadExecutor().submit(() -> {
+        Executors.newSingleThreadExecutor(DAEMON_FACTORY).submit(() -> {
             try {
                 service.sweepStreaming(params, point -> {
                     try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(point))); }

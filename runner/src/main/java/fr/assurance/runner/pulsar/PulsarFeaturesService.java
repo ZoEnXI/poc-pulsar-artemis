@@ -195,7 +195,8 @@ public class PulsarFeaturesService {
 
         final int BAD_PERIOD        = 3;   // 1 message sur 3 est "mauvais"
         final int MAX_REDELIVER     = 2;   // 3 livraisons au total avant DLT
-        final int failExpected      = messages / BAD_PERIOD;
+        // ceil car i%BAD_PERIOD==0 inclut i=0 : pour n=10 → indices 0,3,6,9 = 4 bad (pas 3)
+        final int failExpected      = (int) Math.ceil(messages / (double) BAD_PERIOD);
         final int goodExpected      = messages - failExpected;
         final int totalDeliveries   = goodExpected + failExpected * (MAX_REDELIVER + 1);
 
