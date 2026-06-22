@@ -1,179 +1,152 @@
-# EDA Benchmark — Assurance
+# EDA Benchmark — Artemis vs Pulsar
 
-Banc de mesure comparatif **Apache Pulsar / RabbitMQ / Apache ActiveMQ Artemis**
-dans un contexte d'architecture événementielle assurance, plus un POC Spring Boot
-illustrant un flux contrats via Pulsar avec schema registry.
+Banc de mesure comparatif **Apache ActiveMQ Artemis / Apache Pulsar** dans un contexte
+d'architecture événementielle assurance (CNP / LBP).
 
-L'objectif est de produire des **mesures honnêtes et reproductibles**, pas de
-démontrer qu'un broker est « le plus rapide ». Lire [METHODOLOGY.md](METHODOLOGY.md)
-avant toute interprétation des chiffres.
+Les deux brokers démarrent **en-process** (embedded JVM, zéro Docker) grâce à
+`EmbeddedActiveMQ` et `LocalBookkeeperEnsemble`. Un runner Spring Boot expose une IHM
+Thymeleaf avec résultats en quasi-temps-réel via Server-Sent Events.
 
 ---
 
 ## Prérequis
 
-| Outil | Version minimale |
-|-------|-----------------|
-| Docker | 24+ |
-| Docker Compose | v2.20+ (`docker compose`, pas `docker-compose`) |
-| Bash | 4+ (Git Bash sur Windows) |
-| `jq` | 1.6+ (pour `collect-results.sh`) |
-| RAM libre | 4 Go recommandés pour les 3 brokers simultanés |
+| Outil | Version |
+|-------|---------|
+| JDK   | 17+     |
+| Maven | 3.9+    |
 
-**Aucun JDK local requis** : OMB et l'application Spring Boot s'exécutent dans des conteneurs.
+Aucun Docker, aucun broker externe, aucun Node.js.
 
 ---
 
-## Quickstart — smoke benchmark en < 15 min
+## Démarrage
 
 ```bash
-# 1. Cloner le dépôt
-git clone <url-du-depot>
-cd poc-pulsar-artemis
+# Premier build (télécharge ~200 MB de dépendances Pulsar la première fois)
+mvn package -DskipTests
 
-# 2. Copier l'environnement (les valeurs par défaut fonctionnent sans modification)
-cp .env.example .env
-
-# 3. Démarrer les trois brokers
-docker compose --profile brokers up -d
-
-# 4. Attendre que les trois brokers soient healthy (~60 s la première fois)
-docker compose ps   # Vérifier que STATUS = healthy pour pulsar, rabbitmq, artemis
-
-# 5. Démarrer le runner OMB (build ~5 min la première fois — télécharge OMB + Maven)
-docker compose --profile bench up -d --build omb-runner
-
-# 6. Lancer le smoke workload sur les trois brokers
-./omb/run.sh workloads/smoke.yaml pulsar
-./omb/run.sh workloads/smoke.yaml rabbitmq
-./omb/run.sh workloads/smoke.yaml artemis
-
-# 7. Afficher le résumé des résultats
-./scripts/collect-results.sh
+# Lancer le runner
+mvn -pl runner spring-boot:run
 ```
 
-> La première exécution de l'étape 5 clone OMB depuis GitHub et build le projet
-> (Maven ~5 min). Les runs suivants utilisent l'image déjà construite (<1 min).
+Pulsar met **5 à 15 secondes** à initialiser (ZooKeeper + BookKeeper + broker).
+L'IHM est disponible dès que le log affiche `Pulsar embedded ready`.
 
----
-
-## Workloads complets
-
-### Workload A — Temps réel transactionnel
-
-```bash
-# Palier 500 msg/s
-./omb/run.sh workloads/A-realtime-transactional.yaml pulsar
-./omb/run.sh workloads/A-realtime-transactional.yaml rabbitmq
-./omb/run.sh workloads/A-realtime-transactional.yaml artemis
-
-# Modifier producerRate dans le YAML pour les paliers 750 et 1000 msg/s
-# ou passer l'argument OMB directement :
-docker exec omb-runner /omb/bin/benchmark \
-  --drivers /omb/drivers/pulsar.yaml \
-  --workloads /omb/workloads/A-realtime-transactional.yaml \
-  --output /omb/results/pulsar-A-750.json \
-  --producerRate 750
 ```
-
-### Workload B — Rafale batch de règlement
-
-```bash
-./omb/run.sh workloads/B-batch-settlement-burst.yaml pulsar
-./omb/run.sh workloads/B-batch-settlement-burst.yaml rabbitmq
-./omb/run.sh workloads/B-batch-settlement-burst.yaml artemis
-```
-
-### Workload C — Échange inter-SI (gros payload 32 Ko)
-
-```bash
-./omb/run.sh workloads/C-intersi-large-payload.yaml pulsar
-./omb/run.sh workloads/C-intersi-large-payload.yaml rabbitmq
-./omb/run.sh workloads/C-intersi-large-payload.yaml artemis
-```
-
-### Capturer les stats ressources
-
-Dans un terminal séparé, pendant un run :
-
-```bash
-./scripts/capture-stats.sh A-pulsar 5    # échantillon toutes les 5 s
-# Ctrl-C pour arrêter → results/stats-A-pulsar-<ts>.log
+http://localhost:8080/
 ```
 
 ---
 
-## POC Spring Boot (coding kata)
+## IHM
 
-```bash
-# Démarrer Pulsar + l'application Spring Boot
-docker compose --profile app up -d --build app
-
-# Attendre que l'app soit démarrée (~30 s)
-docker logs -f insurance-app
-
-# Émettre un événement de souscription
-curl -X POST http://localhost:8081/contrats/events \
-  -H "Content-Type: application/json" \
-  -d '{"contractId":"CTR-001","eventType":"SOUSCRIPTION","titulaire":"Jean Dupont","montant":50000}'
-
-# Observer les logs du consommateur
-docker logs -f insurance-app
+```
+┌─ Initialisation ──────────────────────────────────────┐
+│  [ Vérifier les brokers ]   Artemis — prêt   Pulsar — prêt │
+├─ Paramètres du test de charge ────────────────────────┤
+│  Warmup · Messages mesurés · Taille payload            │
+│  Producteurs parallèles · Brokers à tester             │
+│  [ Lancer le test ]  [ Annuler ]                       │
+├─ Progression ─────────────────────────────────────────┤
+│  Artemis ████████████░░░░  1 400 / 2 000               │
+│  Pulsar  ░░░░░░░░░░░░░░░░  en attente…                 │
+├─ Résultats ────────────────────────────────────────────┤
+│          Artemis     Pulsar                            │
+│  p50      X.XX ms    X.XX ms   ▲                       │
+│  p99      X.XX ms    X.XX ms                           │
+│  p99.9    X.XX ms    X.XX ms                           │
+│  Débit    X XXX msg/s  X XXX msg/s  ▲                  │
+│  [Bar chart Chart.js p50 / p99 / p99.9]                │
+└───────────────────────────────────────────────────────┘
 ```
 
-**Scénario kata Key_Shared** : lancer deux instances de l'app, envoyer des événements
-avec le même `contractId` — observer que les messages arrivent toujours sur la même instance.
+### Paramètres
+
+| Paramètre | Défaut | Description |
+|---|---|---|
+| Warmup | 200 | Messages de chauffe (JIT, cache) — non mesurés |
+| Messages mesurés | 2 000 | Fenêtre de mesure par broker |
+| Taille payload | 0 | 0 = `ContratEvent` JSON (~150 B) ; sinon N octets aléatoires |
+| Producteurs parallèles | 1 | Threads producteurs concurrents par broker |
+| Brokers | Artemis + Pulsar | Cocher/décocher pour exclure un broker |
+
+---
+
+## Endpoints REST
+
+| Méthode | URL | Description |
+|---------|-----|-------------|
+| `GET` | `/` | IHM Thymeleaf |
+| `GET` | `/benchmark/health` | Probe les deux brokers (1 msg aller-retour) |
+| `GET` | `/benchmark/stream` | Flux SSE en temps réel (paramètres ci-dessous) |
+| `GET` | `/benchmark` | Run synchrone JSON (legacy, pour scripting) |
+
+Paramètres de `/benchmark/stream` :
+
+```
+?warmup=200&messages=2000&payloadSize=0&artemis=true&pulsar=true&producerCount=1
+```
+
+### Exemple curl
 
 ```bash
-# Deuxième instance sur le port 8082 (modifier Dockerfile/port si besoin)
-# ou via docker compose scale
-docker compose --profile app up -d --scale app=2
+# Run JSON complet (bloquant)
+curl "http://localhost:8080/benchmark?warmup=100&messages=1000"
+
+# Health check
+curl http://localhost:8080/benchmark/health
 ```
 
 ---
 
-## Structure du dépôt
+## Structure du projet
 
 ```
-.
-├── brokers/
-│   ├── pulsar/standalone.conf      # fsync BookKeeper (journalSyncData=true)
-│   ├── rabbitmq/                   # quorum queues + wal_sync_method=sync
-│   └── artemis/broker.xml          # journal-sync-*=true + BLOCK
-├── omb/
-│   ├── Dockerfile                  # JDK 17 / Maven 3.9.9 / clone OMB master
-│   ├── run.sh                      # script de lancement
-│   ├── drivers/                    # configs driver pointant sur hostnames Compose
-│   └── workloads/                  # smoke + A + B + C
-├── app/                            # POC Spring Boot 4.1.0 / Java 25
-├── scripts/
-│   ├── capture-stats.sh            # docker stats pendant les runs
-│   └── collect-results.sh          # tableau de synthèse des JSON OMB
-├── results/                        # JSON OMB + stats (gitignorés sauf .gitkeep)
-├── METHODOLOGY.md                  # protocole, caveats, matrice durabilité
-└── docker-compose.yml              # profils : brokers / bench / app
-```
-
----
-
-## Arrêter l'environnement
-
-```bash
-# Arrêter tout (conserver les volumes)
-docker compose --profile brokers --profile bench --profile app down
-
-# Arrêter et supprimer les volumes (reset complet)
-docker compose --profile brokers --profile bench --profile app down -v
+poc-pulsar-artemis/
+├── pom.xml                         # parent multi-module (Java 17, SB 3.3.5)
+├── broker-artemis/                 # module Artemis embedded
+│   └── …/artemis/
+│       ├── EmbeddedArtemisServer   # démarre EmbeddedActiveMQ sur port libre
+│       └── ArtemisBenchmarkClient  # prod/conso Core protocol, mode producerOnly
+├── broker-pulsar/                  # module Pulsar embedded
+│   └── …/pulsar/
+│       ├── EmbeddedPulsarServer    # ZooKeeper + BookKeeper + PulsarService
+│       └── PulsarBenchmarkClient   # prod/conso, mode producerOnly
+└── runner/                         # module Spring Boot
+    └── …/runner/
+        ├── RunnerApplication       # démarre les deux serveurs comme beans Spring
+        ├── BenchmarkParams         # record des paramètres (warmup, messages, …)
+        ├── BenchmarkProgress       # record émis dans le flux SSE
+        ├── BenchmarkResult         # record résultat final (legacy JSON)
+        ├── BenchmarkService        # orchestration : single-thread et parallèle
+        ├── BenchmarkController     # endpoints REST + SSE + Thymeleaf
+        └── domain/ContratEvent     # événement métier assurance (SOUSCRIPTION, …)
 ```
 
 ---
 
-## Points importants avant d'interpréter les chiffres
+## Versions
 
-- **Iso-durabilité** : les trois brokers sont configurés avec fsync par message.
-  Voir [METHODOLOGY.md §1](METHODOLOGY.md#1-matrice-iso-durabilité).
-- **Limite driver Artemis** : 1 producteur / 1 consommateur par queue dans OMB.
-  Les workloads sont normalisés autour de cette contrainte.
-  Voir [METHODOLOGY.md §3](METHODOLOGY.md#3-limite-du-driver-artemis--topologie).
-- **Mono-nœud** : la réplication BookKeeper de Pulsar (avantage HA) n'est pas mesurée.
-  Voir [METHODOLOGY.md §5](METHODOLOGY.md#5-caveats).
+| Composant | Version |
+|-----------|---------|
+| Java | 17 |
+| Spring Boot | 3.3.5 |
+| ActiveMQ Artemis | 2.36.0 |
+| Apache Pulsar | 3.3.5 |
+| Jackson | 2.17.2 |
+
+---
+
+## Mesures et interprétation
+
+- **Latence publish** : `nanoTime` avant/après `send()` **synchrone et bloquant** —
+  inclut le round-trip réseau local (loopback) + ack broker.
+- **Pas de batching** : chaque message est un round-trip indépendant.
+- **Percentiles** calculés sur l'ensemble des latences triées après le run
+  (pas de HDR Histogram).
+- **Mode parallèle** (`producerCount > 1`) : N threads producteurs concurrents,
+  chacun avec sa propre connexion. Latences fusionnées avant calcul des percentiles.
+  Le débit affiché est le débit agrégé (`N × messages / temps total`).
+- **Environnement** : les deux brokers partagent la même JVM et le même CPU —
+  les chiffres mesurent le comportement embedded, pas un cluster de production.

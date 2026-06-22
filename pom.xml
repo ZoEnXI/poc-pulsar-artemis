@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>fr.assurance</groupId>
+  <artifactId>poc-pulsar-artemis</artifactId>
+  <version>1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <modules>
+    <module>broker-artemis</module>
+    <module>broker-pulsar</module>
+    <module>runner</module>
+  </modules>
+
+  <properties>
+    <java.version>17</java.version>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <artemis.version>2.36.0</artemis.version>
+    <!-- 3.3.5 : LTS stable, dépendances internes homogènes (pas de conflit gRPC) -->
+    <pulsar.version>3.3.5</pulsar.version>
+    <jackson.version>2.17.2</jackson.version>
+    <slf4j.version>2.0.13</slf4j.version>
+    <logback.version>1.5.6</logback.version>
+    <spring-boot.version>3.3.5</spring-boot.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Spring Boot BOM — utilisé uniquement par le module runner -->
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring-boot.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- Override Spring Boot BOM's Pulsar version + exclude components unused here -->
+      <dependency>
+        <groupId>org.apache.pulsar</groupId>
+        <artifactId>pulsar-broker</artifactId>
+        <version>${pulsar.version}</version>
+        <exclusions>
+          <!-- stream-storage-server: BookKeeper streaming storage, not needed for Pulsar standalone -->
+          <exclusion>
+            <groupId>org.apache.bookkeeper</groupId>
+            <artifactId>stream-storage-server</artifactId>
+          </exclusion>
+          <exclusion>
+            <groupId>org.apache.bookkeeper</groupId>
+            <artifactId>stream-storage-java-client</artifactId>
+          </exclusion>
+          <!-- pulsar-functions-worker: brings in grpc-all with hard version constraint -->
+          <exclusion>
+            <groupId>org.apache.pulsar</groupId>
+            <artifactId>pulsar-functions-worker</artifactId>
+          </exclusion>
+        </exclusions>
+      </dependency>
+
+      <!-- Modules locaux -->
+      <dependency>
+        <groupId>fr.assurance</groupId>
+        <artifactId>broker-artemis</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>fr.assurance</groupId>
+        <artifactId>broker-pulsar</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- Logging commun -->
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ch.qos.logback</groupId>
+        <artifactId>logback-classic</artifactId>
+        <version>${logback.version}</version>
+      </dependency>
+
+      <!-- Jackson partagé -->
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+          <configuration>
+            <release>${java.version}</release>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+          <version>${spring-boot.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+
+</project>

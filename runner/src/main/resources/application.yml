@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: poc-pulsar-artemis
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: 8080
+
+logging:
+  level:
+    fr.assurance: INFO
+    org.apache.pulsar: WARN
+    org.apache.activemq: WARN
+    org.apache.bookkeeper: WARN
+    org.apache.zookeeper: WARN
