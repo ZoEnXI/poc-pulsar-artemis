@@ -222,6 +222,11 @@
           <div class="field-hint">1 = E2E activé · &gt;1 = pub only</div>
         </div>
         <div class="field">
+          <label for="runs">Répétitions</label>
+          <input type="number" id="runs" value="1" min="1" max="5"/>
+          <div class="field-hint">1 = live · 2-5 = p99 ± σ inter-runs</div>
+        </div>
+        <div class="field">
           <label>Brokers</label>
           <div class="brokers-row">
             <label class="broker-check"><input type="checkbox" id="chk-artemis" checked/><span style="color:#f59e0b">Artemis</span></label>
@@ -279,6 +284,31 @@
     <div id="chart-e2e-wrap" style="display:none">
       <div class="chart-title">Latence end-to-end (→ réception consommateur)</div>
       <div class="chart-wrapper"><canvas id="chart-e2e"></canvas></div>
+    </div>
+  </div>
+  <div class="card" id="sweep-card">
+    <div class="card-header">
+      <h2>Payload Sweep — latence p99 vs taille (128 B → 64 KB)</h2>
+      <span class="note">utilise warmup / messages / brokers ci-dessus</span>
+    </div>
+    <div class="btn-row" style="margin-bottom:.8rem">
+      <button class="btn btn-secondary" id="btn-sweep">Lancer le sweep</button>
+      <span id="sweep-status" style="font-size:.78rem;color:#4b5563;align-self:center"></span>
+    </div>
+    <div id="sweep-error" class="error-box"></div>
+    <div id="sweep-results" style="display:none">
+      <div class="chart-title">Latence p99 (ms) par taille de payload</div>
+      <div class="chart-wrapper" style="height:260px"><canvas id="chart-sweep"></canvas></div>
+      <div id="sweep-table-wrap" style="margin-top:1rem;overflow-x:auto">
+        <table class="results-table" id="sweep-table">
+          <thead><tr>
+            <th>Taille</th>
+            <th id="sth-artemis" style="color:#f59e0b;display:none">Artemis p99</th>
+            <th id="sth-pulsar"  style="color:#22d3ee;display:none">Pulsar p99</th>
+          </tr></thead>
+          <tbody id="sweep-body"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -613,9 +643,11 @@
 
   let activeEs = null, bState = {}, chartPub = null, chartE2e = null;
   let expectedDone = new Set(), doneBrokers = new Set();
+  let bRuns = 1;  // total runs for current benchmark
 
-  const f2  = v => v > 0 ? v.toFixed(2) + ' ms' : '—';
-  const ftp = v => v > 0 ? Math.round(v).toLocaleString('fr-FR') + ' msg/s' : '—';
+  const f2    = v => v > 0 ? v.toFixed(2) + ' ms' : '—';
+  const ftp   = v => v > 0 ? Math.round(v).toLocaleString('fr-FR') + ' msg/s' : '—';
+  const fStd  = v => v > 0 ? ' ± ' + v.toFixed(2) + ' ms' : '';
 
   function setBadge(el, status) {
     const name = el.id === 'badge-artemis' ? 'Artemis' : 'Pulsar';
@@ -669,12 +701,26 @@
   }
 
   function updateProgress(p) {
-    const pct = p.total > 0 ? Math.round(p.sent / p.total * 100) : 0;
+    // Multi-run intermédiaire : run non-done → affiche juste le résumé du run
+    if (p.totalRuns > 1 && !p.done) {
+      document.getElementById('fill-' + p.broker).style.width =
+          Math.round(p.run / p.totalRuns * 100) + '%';
+      document.getElementById('txt-'  + p.broker).textContent =
+          'Run ' + p.run + ' / ' + p.totalRuns + ' — p99 ' + f2(p.p99Ms);
+      document.getElementById('lp99-' + p.broker).textContent = f2(p.p99Ms);
+      document.getElementById('ltp-'  + p.broker).textContent = ftp(p.throughputMsgSec);
+      bState[p.broker] = p;
+      return;
+    }
+    // Single run streaming ou événement final multi-run
+    const pct = p.total > 0 ? Math.round(p.sent / p.total * 100) : 100;
     document.getElementById('fill-' + p.broker).style.width = pct + '%';
     document.getElementById('txt-'  + p.broker).textContent =
-        p.sent.toLocaleString('fr-FR') + ' / ' + p.total.toLocaleString('fr-FR');
+        p.totalRuns > 1
+          ? 'Run ' + p.run + '/' + p.totalRuns + ' terminé'
+          : p.sent.toLocaleString('fr-FR') + ' / ' + p.total.toLocaleString('fr-FR');
     document.getElementById('lp50-' + p.broker).textContent = f2(p.p50Ms);
-    document.getElementById('lp99-' + p.broker).textContent = f2(p.p99Ms);
+    document.getElementById('lp99-' + p.broker).textContent = f2(p.p99Ms) + fStd(p.p99StddevMs);
     document.getElementById('le50-' + p.broker).textContent = f2(p.e2eP50Ms);
     document.getElementById('ltp-'  + p.broker).textContent = ftp(p.throughputMsgSec);
     bState[p.broker] = p;
@@ -689,23 +735,27 @@
     const showP  = document.getElementById('th-pulsar').style.display  !== 'none';
     const pubRows = [
       { label: 'p50',   ka: a?.p50Ms,            kp: p?.p50Ms,            fmt: f2,  lower: true  },
-      { label: 'p99',   ka: a?.p99Ms,             kp: p?.p99Ms,            fmt: f2,  lower: true  },
+      { label: 'p99',   ka: a?.p99Ms,             kp: p?.p99Ms,            fmt: f2,  lower: true,
+        stdA: a?.p99StddevMs, stdP: p?.p99StddevMs },
       { label: 'p99.9', ka: a?.p999Ms,            kp: p?.p999Ms,           fmt: f2,  lower: true  },
       { label: 'Débit', ka: a?.throughputMsgSec,  kp: p?.throughputMsgSec, fmt: ftp, lower: false },
     ];
     const e2eRows = [
       { label: 'p50 (e2e)',   ka: a?.e2eP50Ms,  kp: p?.e2eP50Ms,  fmt: f2, lower: true },
-      { label: 'p99 (e2e)',   ka: a?.e2eP99Ms,  kp: p?.e2eP99Ms,  fmt: f2, lower: true },
+      { label: 'p99 (e2e)',   ka: a?.e2eP99Ms,  kp: p?.e2eP99Ms,  fmt: f2, lower: true,
+        stdA: a?.e2eP99StddevMs, stdP: p?.e2eP99StddevMs },
       { label: 'p99.9 (e2e)', ka: a?.e2eP999Ms, kp: p?.e2eP999Ms, fmt: f2, lower: true },
     ];
     function rowHtml(m, sub) {
       const aWins = both && (m.lower ? m.ka < m.kp : m.ka > m.kp);
       const pWins = both && !aWins;
       const cls   = sub ? 'sub-metric' : 'metric';
+      const aStd  = m.stdA ? `<span style="color:#6b7280;font-weight:400;font-size:.72em"> ± ${m.stdA.toFixed(2)} ms</span>` : '';
+      const pStd  = m.stdP ? `<span style="color:#6b7280;font-weight:400;font-size:.72em"> ± ${m.stdP.toFixed(2)} ms</span>` : '';
       return `<tr>
         <td class="${cls}">${m.label}</td>
-        ${showA ? `<td class="val-a">${m.fmt(m.ka)}${aWins ? '<span class="winner-badge winner-a">▲</span>' : ''}</td>` : ''}
-        ${showP ? `<td class="val-p">${m.fmt(m.kp)}${pWins ? '<span class="winner-badge winner-p">▲</span>' : ''}</td>` : ''}
+        ${showA ? `<td class="val-a">${m.fmt(m.ka)}${aStd}${aWins ? '<span class="winner-badge winner-a">▲</span>' : ''}</td>` : ''}
+        ${showP ? `<td class="val-p">${m.fmt(m.kp)}${pStd}${pWins ? '<span class="winner-badge winner-p">▲</span>' : ''}</td>` : ''}
       </tr>`;
     }
     const cols = 1 + (showA ? 1 : 0) + (showP ? 1 : 0);
@@ -760,25 +810,31 @@
     const messages      = document.getElementById('messages').value;
     const payloadSize   = document.getElementById('payloadSize').value;
     const producerCount = document.getElementById('producerCount').value;
+    const runs          = Math.max(1, Math.min(5, +document.getElementById('runs').value || 1));
     const incA = document.getElementById('chk-artemis').checked;
     const incP = document.getElementById('chk-pulsar').checked;
     if (!incA && !incP) { errBox.textContent = 'Sélectionne au moins un broker.'; errBox.style.display = 'block'; return; }
     const e2eNote = +producerCount === 1 ? ' · E2E activé' : ' · pub only (parallèle)';
     const pl = +payloadSize > 0 ? `${payloadSize} B` : 'ContratEvent JSON';
-    resetBench(incA, incP, `warmup ${warmup} · ${(+messages).toLocaleString('fr-FR')} msgs · ${pl} · ${producerCount} prod.${e2eNote}`);
+    const runsNote = runs > 1 ? ` · ${runs} runs` : '';
+    resetBench(incA, incP, `warmup ${warmup} · ${(+messages).toLocaleString('fr-FR')} msgs · ${pl} · ${producerCount} prod.${e2eNote}${runsNote}`);
     btnRun.disabled = true; btnRun.textContent = 'En cours…'; btnStop.style.display = '';
-    expectedDone = new Set(); doneBrokers = new Set();
+    expectedDone = new Set(); doneBrokers = new Set(); bRuns = runs;
     if (incA) expectedDone.add('artemis'); if (incP) expectedDone.add('pulsar');
     const url = `/benchmark/stream?warmup=${warmup}&messages=${messages}&payloadSize=${payloadSize}`
-              + `&artemis=${incA}&pulsar=${incP}&producerCount=${producerCount}`;
+              + `&artemis=${incA}&pulsar=${incP}&producerCount=${producerCount}&runs=${runs}`;
     activeEs = new EventSource(url);
     activeEs.onmessage = ev => {
       const p = JSON.parse(ev.data);
       updateProgress(p);
+      // En mode multi-run, le vrai "done" est l'événement avec p99StddevMs > 0 (ou runs=1)
       if (p.done) {
-        doneBrokers.add(p.broker);
-        if ([...expectedDone].every(b => doneBrokers.has(b))) {
-          activeEs.close(); activeEs = null; renderCharts(); finishBench();
+        const isFinal = p.totalRuns <= 1 || p.p99StddevMs > 0;
+        if (isFinal) {
+          doneBrokers.add(p.broker);
+          if ([...expectedDone].every(b => doneBrokers.has(b))) {
+            activeEs.close(); activeEs = null; renderCharts(); finishBench();
+          }
         }
       }
     };
@@ -956,6 +1012,108 @@
   function markPhaseDone(phase) {
     const icon = document.getElementById('icon-' + phase);
     if (icon) icon.className = 'phase-icon done';
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     PAYLOAD SWEEP
+     ═══════════════════════════════════════════════════════════ */
+  let sweepChart = null, sweepEs = null;
+
+  document.getElementById('btn-sweep').addEventListener('click', () => {
+    const warmup   = document.getElementById('warmup').value;
+    const messages = document.getElementById('messages').value;
+    const incA     = document.getElementById('chk-artemis').checked;
+    const incP     = document.getElementById('chk-pulsar').checked;
+    if (!incA && !incP) return;
+    startSweep(warmup, messages, incA, incP);
+  });
+
+  function startSweep(warmup, messages, incA, incP) {
+    const btnSw   = document.getElementById('btn-sweep');
+    const swSt    = document.getElementById('sweep-status');
+    const swErr   = document.getElementById('sweep-error');
+    const swRes   = document.getElementById('sweep-results');
+    const swBody  = document.getElementById('sweep-body');
+
+    if (sweepEs) { sweepEs.close(); sweepEs = null; }
+    btnSw.disabled = true; btnSw.textContent = 'Sweep en cours…';
+    swErr.style.display = 'none'; swRes.style.display = 'block';
+    swBody.innerHTML = '';
+    document.getElementById('sth-artemis').style.display = incA ? '' : 'none';
+    document.getElementById('sth-pulsar').style.display  = incP ? '' : 'none';
+    swSt.textContent = '';
+
+    if (sweepChart) { sweepChart.destroy(); sweepChart = null; }
+    sweepChart = new Chart(document.getElementById('chart-sweep'), {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          ...(incA ? [{
+            label: 'Artemis p99', data: [],
+            borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.08)',
+            tension: .35, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2,
+          }] : []),
+          ...(incP ? [{
+            label: 'Pulsar p99', data: [],
+            borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,.08)',
+            tension: .35, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2,
+          }] : []),
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#9ca3af', font: { size: 12 } } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms` } },
+        },
+        scales: {
+          x: { ticks: { color: '#6b7280' }, grid: { color: '#1a1d2e' } },
+          y: {
+            ticks: { color: '#6b7280', callback: v => v + ' ms' },
+            grid: { color: '#2d3148' },
+            title: { display: true, text: 'latence p99 (ms)', color: '#6b7280', font: { size: 11 } },
+          },
+        },
+      },
+    });
+
+    let dsA = incA ? 0 : -1;
+    let dsP = incP ? (incA ? 1 : 0) : -1;
+
+    sweepEs = new EventSource(`/benchmark/sweep/stream?warmup=${warmup}&messages=${messages}&artemis=${incA}&pulsar=${incP}`);
+    sweepEs.onmessage = ev => {
+      const d = JSON.parse(ev.data);
+
+      if (d.phase === 'MEASURING') {
+        swSt.textContent = `Mesure en cours : ${d.sizeLabel} (${d.sizeIndex + 1}/${d.totalSizes})…`;
+        return;
+      }
+
+      if (d.phase === 'POINT') {
+        sweepChart.data.labels.push(d.sizeLabel);
+        if (dsA >= 0) sweepChart.data.datasets[dsA].data.push(+d.artemisP99Ms.toFixed(3));
+        if (dsP >= 0) sweepChart.data.datasets[dsP].data.push(+d.pulsarP99Ms.toFixed(3));
+        sweepChart.update();
+
+        const artCell = incA ? `<td class="val-a">${d.artemisP99Ms.toFixed(2)} ms</td>` : '';
+        const pulCell = incP ? `<td class="val-p">${d.pulsarP99Ms.toFixed(2)} ms</td>` : '';
+        swBody.insertAdjacentHTML('beforeend',
+          `<tr><td class="metric">${d.sizeLabel}</td>${artCell}${pulCell}</tr>`);
+        swSt.textContent = `${d.sizeIndex + 1} / ${d.totalSizes} tailles mesurées`;
+      }
+
+      if (d.phase === 'DONE') {
+        sweepEs.close(); sweepEs = null;
+        swSt.textContent = 'Sweep terminé.';
+        btnSw.disabled = false; btnSw.textContent = 'Lancer le sweep';
+      }
+    };
+    sweepEs.onerror = () => {
+      if (sweepEs) { sweepEs.close(); sweepEs = null; }
+      swErr.textContent = 'Erreur SSE — vérifie les logs.'; swErr.style.display = 'block';
+      btnSw.disabled = false; btnSw.textContent = 'Lancer le sweep';
+    };
   }
 
   /* ═══════════════════════════════════════════════════════════

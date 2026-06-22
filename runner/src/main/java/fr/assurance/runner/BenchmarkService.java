@@ -25,6 +25,9 @@ public class BenchmarkService {
     private static final Logger log = LoggerFactory.getLogger(BenchmarkService.class);
     private static final int REPORT_INTERVAL = 100;
 
+    private static final int[]    SWEEP_SIZES  = {128, 1024, 10240, 65536};
+    private static final String[] SWEEP_LABELS = {"128 B", "1 KB", "10 KB", "64 KB"};
+
     private final EmbeddedArtemisServer artemisServer;
     private final EmbeddedPulsarServer  pulsarServer;
     private final ObjectMapper mapper;
@@ -83,18 +86,105 @@ public class BenchmarkService {
 
     public void runStreaming(BenchmarkParams params, Consumer<BenchmarkProgress> cb) throws Exception {
         byte[] payload = buildPayload(params.payloadSize());
-        log.info("Stream — payload={}B warmup={} messages={} producers={} artemis={} pulsar={}",
+        log.info("Stream — payload={}B warmup={} messages={} producers={} runs={} artemis={} pulsar={}",
                 payload.length, params.warmup(), params.messages(),
-                params.producerCount(), params.artemis(), params.pulsar());
+                params.producerCount(), params.runs(), params.artemis(), params.pulsar());
 
-        if (params.artemis()) {
-            if (params.producerCount() > 1) streamArtemisPar(payload, params, cb);
-            else                            streamArtemis(payload, params, cb);
+        if (params.runs() > 1) {
+            runStreamingMulti(payload, params, cb);
+        } else {
+            runStreamingSingle(payload, params, cb);
         }
-        if (params.pulsar()) {
-            if (params.producerCount() > 1) streamPulsarPar(payload, params, cb);
-            else                            streamPulsar(payload, params, cb);
+    }
+
+    // ── Single run — streaming par message ───────────────────────────────────
+
+    private void runStreamingSingle(byte[] payload, BenchmarkParams p, Consumer<BenchmarkProgress> cb) throws Exception {
+        if (p.artemis()) {
+            if (p.producerCount() > 1) streamArtemisPar(payload, p, cb);
+            else                       streamArtemis(payload, p, cb);
         }
+        if (p.pulsar()) {
+            if (p.producerCount() > 1) streamPulsarPar(payload, p, cb);
+            else                       streamPulsar(payload, p, cb);
+        }
+    }
+
+    // ── Multi-run — silent, émet un résumé par run + stddev finale ───────────
+
+    private void runStreamingMulti(byte[] payload, BenchmarkParams p, Consumer<BenchmarkProgress> cb) throws Exception {
+        int N = p.runs();
+        BenchmarkResult.BrokerMetrics[] artRuns = new BenchmarkResult.BrokerMetrics[N];
+        BenchmarkResult.BrokerMetrics[] pulRuns = new BenchmarkResult.BrokerMetrics[N];
+
+        for (int r = 0; r < N; r++) {
+            int run = r + 1;
+            log.info("Multi-run {}/{}", run, N);
+            if (p.artemis()) {
+                artRuns[r] = benchmarkArtemis(payload, p.warmup(), p.messages());
+                cb.accept(runSummaryEvt("artemis", run, N, artRuns[r]));
+            }
+            if (p.pulsar()) {
+                pulRuns[r] = benchmarkPulsar(payload, p.warmup(), p.messages());
+                cb.accept(runSummaryEvt("pulsar", run, N, pulRuns[r]));
+            }
+        }
+
+        if (p.artemis()) cb.accept(stddevEvt("artemis", N, artRuns));
+        if (p.pulsar())  cb.accept(stddevEvt("pulsar",  N, pulRuns));
+    }
+
+    private static BenchmarkProgress runSummaryEvt(String broker, int run, int totalRuns,
+                                                    BenchmarkResult.BrokerMetrics m) {
+        return new BenchmarkProgress(broker, false,
+                m.messagesSent(), m.messagesSent(),
+                m.p50Ms(), m.p99Ms(), m.p999Ms(), m.throughputMsgSec(),
+                m.e2eP50Ms(), m.e2eP99Ms(), m.e2eP999Ms(),
+                run, totalRuns, 0, 0);
+    }
+
+    private static BenchmarkProgress stddevEvt(String broker, int runs,
+                                                BenchmarkResult.BrokerMetrics[] ms) {
+        double p50  = mean(ms, BenchmarkResult.BrokerMetrics::p50Ms);
+        double p99  = mean(ms, BenchmarkResult.BrokerMetrics::p99Ms);
+        double p999 = mean(ms, BenchmarkResult.BrokerMetrics::p999Ms);
+        double tp   = mean(ms, BenchmarkResult.BrokerMetrics::throughputMsgSec);
+        double e50  = mean(ms, BenchmarkResult.BrokerMetrics::e2eP50Ms);
+        double e99  = mean(ms, BenchmarkResult.BrokerMetrics::e2eP99Ms);
+        double e999 = mean(ms, BenchmarkResult.BrokerMetrics::e2eP999Ms);
+        double stdP99  = stddev(ms, BenchmarkResult.BrokerMetrics::p99Ms,  p99);
+        double stdE99  = stddev(ms, BenchmarkResult.BrokerMetrics::e2eP99Ms, e99);
+        return new BenchmarkProgress(broker, true,
+                ms[0].messagesSent(), ms[0].messagesSent(),
+                p50, p99, p999, tp, e50, e99, e999,
+                runs, runs, stdP99, stdE99);
+    }
+
+    // ── Sweep — p99 vs taille payload ────────────────────────────────────────
+
+    public void sweepStreaming(BenchmarkParams params, Consumer<SweepProgress> cb) throws Exception {
+        log.info("Sweep — warmup={} messages={} artemis={} pulsar={}",
+                params.warmup(), params.messages(), params.artemis(), params.pulsar());
+
+        List<SweepPoint> points = new ArrayList<>();
+
+        for (int si = 0; si < SWEEP_SIZES.length; si++) {
+            int size = SWEEP_SIZES[si];
+            String label = SWEEP_LABELS[si];
+            byte[] payload = new byte[size];
+            new Random().nextBytes(payload);
+
+            cb.accept(new SweepProgress("MEASURING", si, SWEEP_SIZES.length, size, label, 0, 0, List.copyOf(points)));
+
+            double artP99 = 0, pulP99 = 0;
+            if (params.artemis()) artP99 = benchmarkArtemis(payload, params.warmup(), params.messages()).p99Ms();
+            if (params.pulsar())  pulP99 = benchmarkPulsar(payload,  params.warmup(), params.messages()).p99Ms();
+
+            points.add(new SweepPoint(size, label, artP99, pulP99));
+            cb.accept(new SweepProgress("POINT", si, SWEEP_SIZES.length, size, label, artP99, pulP99, List.copyOf(points)));
+        }
+
+        cb.accept(new SweepProgress("DONE", SWEEP_SIZES.length - 1, SWEEP_SIZES.length, 0, "", 0, 0, List.copyOf(points)));
     }
 
     // ── Artemis — single producer, E2E mesuré ─────────────────────────────────
@@ -117,9 +207,9 @@ public class BenchmarkService {
                 long[] both = c.sendAndMeasureBoth(payload);
                 pub[i] = both[0]; e2e[i] = both[1];
                 if ((i + 1) % REPORT_INTERVAL == 0)
-                    cb.accept(partial("artemis", i + 1, n, pub, e2e, System.nanoTime() - t0));
+                    cb.accept(partial("artemis", i + 1, n, pub, e2e, System.nanoTime() - t0, 1, 1));
             }
-            cb.accept(finalEvt("artemis", n, pub, e2e, System.nanoTime() - t0));
+            cb.accept(finalEvt("artemis", n, pub, e2e, System.nanoTime() - t0, 1, 1));
         }
     }
 
@@ -163,7 +253,7 @@ public class BenchmarkService {
             });
         }
         while (!done.await(300, TimeUnit.MILLISECONDS))
-            cb.accept(parProgress("artemis", sent.get(), actual, System.nanoTime() - t0));
+            cb.accept(parProgress("artemis", sent.get(), actual, System.nanoTime() - t0, 1, 1));
         pool.shutdown();
         if (err.get() != null) throw err.get();
 
@@ -171,7 +261,7 @@ public class BenchmarkService {
         try (ArtemisBenchmarkClient dc = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) { dc.drain(actual, 60_000); }
 
         long[] all = merge(tlat, threads, perThread);
-        cb.accept(finalEvt("artemis", actual, all, EMPTY, elapsed));
+        cb.accept(finalEvt("artemis", actual, all, EMPTY, elapsed, 1, 1));
     }
 
     // ── Pulsar — single producer, E2E mesuré ──────────────────────────────────
@@ -194,9 +284,9 @@ public class BenchmarkService {
                 long[] both = c.sendAndMeasureBoth(payload, "k" + i);
                 pub[i] = both[0]; e2e[i] = both[1];
                 if ((i + 1) % REPORT_INTERVAL == 0)
-                    cb.accept(partial("pulsar", i + 1, n, pub, e2e, System.nanoTime() - t0));
+                    cb.accept(partial("pulsar", i + 1, n, pub, e2e, System.nanoTime() - t0, 1, 1));
             }
-            cb.accept(finalEvt("pulsar", n, pub, e2e, System.nanoTime() - t0));
+            cb.accept(finalEvt("pulsar", n, pub, e2e, System.nanoTime() - t0, 1, 1));
         }
     }
 
@@ -240,7 +330,7 @@ public class BenchmarkService {
             });
         }
         while (!done.await(300, TimeUnit.MILLISECONDS))
-            cb.accept(parProgress("pulsar", sent.get(), actual, System.nanoTime() - t0));
+            cb.accept(parProgress("pulsar", sent.get(), actual, System.nanoTime() - t0, 1, 1));
         pool.shutdown();
         if (err.get() != null) throw err.get();
 
@@ -248,7 +338,7 @@ public class BenchmarkService {
         try (PulsarBenchmarkClient dc = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) { dc.drain(actual, 60_000); }
 
         long[] all = merge(tlat, threads, perThread);
-        cb.accept(finalEvt("pulsar", actual, all, EMPTY, elapsed));
+        cb.accept(finalEvt("pulsar", actual, all, EMPTY, elapsed, 1, 1));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -256,7 +346,8 @@ public class BenchmarkService {
     private static final long[] EMPTY = new long[0];
 
     private static BenchmarkProgress partial(String broker, int sent, int total,
-                                              long[] pub, long[] e2e, long elapsedNs) {
+                                              long[] pub, long[] e2e, long elapsedNs,
+                                              int run, int totalRuns) {
         long[] sp = Arrays.copyOf(pub, sent); Arrays.sort(sp);
         long[] se = Arrays.copyOf(e2e, sent); Arrays.sort(se);
         return new BenchmarkProgress(broker, false, sent, total,
@@ -266,11 +357,13 @@ public class BenchmarkService {
                 sent / (elapsedNs / 1e9),
                 toMs(se[(int)(sent * 0.50)]),
                 toMs(se[(int)(sent * 0.99)]),
-                toMs(se[clamp(sent, 0.999)]));
+                toMs(se[clamp(sent, 0.999)]),
+                run, totalRuns, 0, 0);
     }
 
     private static BenchmarkProgress finalEvt(String broker, int n,
-                                               long[] pub, long[] e2e, long elapsedNs) {
+                                               long[] pub, long[] e2e, long elapsedNs,
+                                               int run, int totalRuns) {
         long[] sp = pub.clone(); Arrays.sort(sp);
         boolean hasE2e = e2e.length == n;
         long[] se = hasE2e ? e2e.clone() : new long[n];
@@ -280,14 +373,17 @@ public class BenchmarkService {
                 toMs(sp[(int)(n * 0.99)]),
                 toMs(sp[clamp(n, 0.999)]),
                 n / (elapsedNs / 1e9),
-                hasE2e ? toMs(se[(int)(n * 0.50)])      : 0,
-                hasE2e ? toMs(se[(int)(n * 0.99)])      : 0,
-                hasE2e ? toMs(se[clamp(n, 0.999)])      : 0);
+                hasE2e ? toMs(se[(int)(n * 0.50)])  : 0,
+                hasE2e ? toMs(se[(int)(n * 0.99)])  : 0,
+                hasE2e ? toMs(se[clamp(n, 0.999)]) : 0,
+                run, totalRuns, 0, 0);
     }
 
-    private static BenchmarkProgress parProgress(String broker, int sent, int total, long elapsedNs) {
+    private static BenchmarkProgress parProgress(String broker, int sent, int total,
+                                                   long elapsedNs, int run, int totalRuns) {
         return new BenchmarkProgress(broker, false, sent, total,
-                0, 0, 0, sent / (elapsedNs / 1e9), 0, 0, 0);
+                0, 0, 0, sent / (elapsedNs / 1e9), 0, 0, 0,
+                run, totalRuns, 0, 0);
     }
 
     private static BenchmarkResult.BrokerMetrics toMetrics(int n, long[] pub, long[] e2e, long elapsedNs) {
@@ -309,7 +405,6 @@ public class BenchmarkService {
         return all;
     }
 
-    /** Temps total basé sur la somme des latences (approximation wall-time pour mode séquentiel). */
     private static long wallTime(long[] lat) {
         long sum = 0; for (long l : lat) sum += l; return sum;
     }
@@ -325,5 +420,24 @@ public class BenchmarkService {
     private static ContratEvent sampleEvent() {
         return new ContratEvent(UUID.randomUUID().toString(), EventType.SOUSCRIPTION,
                 Instant.now(), "Dupont Jean", "PREVOYANCE-VIE", 100_000.00);
+    }
+
+    // ── Statistiques inter-runs ───────────────────────────────────────────────
+
+    @FunctionalInterface
+    private interface MetricExtractor {
+        double get(BenchmarkResult.BrokerMetrics m);
+    }
+
+    private static double mean(BenchmarkResult.BrokerMetrics[] ms, MetricExtractor f) {
+        double sum = 0;
+        for (BenchmarkResult.BrokerMetrics m : ms) sum += f.get(m);
+        return sum / ms.length;
+    }
+
+    private static double stddev(BenchmarkResult.BrokerMetrics[] ms, MetricExtractor f, double mean) {
+        double sum = 0;
+        for (BenchmarkResult.BrokerMetrics m : ms) sum += Math.pow(f.get(m) - mean, 2);
+        return Math.sqrt(sum / ms.length);
     }
 }

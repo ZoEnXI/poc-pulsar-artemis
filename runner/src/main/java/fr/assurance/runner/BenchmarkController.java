@@ -50,16 +50,42 @@ public class BenchmarkController {
             @RequestParam(defaultValue = "0")    int payloadSize,
             @RequestParam(defaultValue = "true") boolean artemis,
             @RequestParam(defaultValue = "true") boolean pulsar,
-            @RequestParam(defaultValue = "1")    int producerCount
+            @RequestParam(defaultValue = "1")    int producerCount,
+            @RequestParam(defaultValue = "1")    int runs
     ) {
         BenchmarkParams params = new BenchmarkParams(
-                warmup, messages, payloadSize, artemis, pulsar, Math.max(1, producerCount));
-        SseEmitter emitter = new SseEmitter(300_000L);
+                warmup, messages, payloadSize, artemis, pulsar,
+                Math.max(1, producerCount), Math.max(1, Math.min(runs, 5)));
+        SseEmitter emitter = new SseEmitter(600_000L);
 
         Executors.newSingleThreadExecutor().submit(() -> {
             try {
                 service.runStreaming(params, progress -> {
                     try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(progress))); }
+                    catch (Exception e) { emitter.completeWithError(e); }
+                });
+                emitter.complete();
+            } catch (Exception e) { emitter.completeWithError(e); }
+        });
+
+        return emitter;
+    }
+
+    @GetMapping(value = "/benchmark/sweep/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @ResponseBody
+    public SseEmitter sweepStream(
+            @RequestParam(defaultValue = "50")   int warmup,
+            @RequestParam(defaultValue = "500")  int messages,
+            @RequestParam(defaultValue = "true") boolean artemis,
+            @RequestParam(defaultValue = "true") boolean pulsar
+    ) {
+        BenchmarkParams params = new BenchmarkParams(warmup, messages, 0, artemis, pulsar, 1, 1);
+        SseEmitter emitter = new SseEmitter(600_000L);
+
+        Executors.newSingleThreadExecutor().submit(() -> {
+            try {
+                service.sweepStreaming(params, point -> {
+                    try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(point))); }
                     catch (Exception e) { emitter.completeWithError(e); }
                 });
                 emitter.complete();
