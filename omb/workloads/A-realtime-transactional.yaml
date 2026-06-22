@@ -1,0 +1,57 @@
+###############################################################################
+# Workload A — Temps réel transactionnel
+# Cas d'usage : flux EDA assurance — souscription, avenant, rachat, sinistre
+#
+# Caractéristiques :
+#   - Payload JSON synthétique ≈ 2 Ko (évènement contrat sérialisé)
+#   - Partitionné, clé de message = numéro de contrat (ordre par contrat)
+#   - Fan-out : 4 souscriptions (compta, notification, reporting réglementaire, datalake)
+#   - Balayage de débit : 500 / 750 / 1000 msg/s
+#   - Objectif : latence E2E p50 / p99 / p99.9 à débit maîtrisé
+#
+# Partitionnement par clé :
+#   Pulsar     → Key_Shared subscription + clé dans le message header
+#   RabbitMQ   → consistent-hash exchange ou clé dans le routing key
+#   Artemis    → message grouping (LIMIT : 1P/1C par défaut dans le driver)
+#
+# Omission coordonnée :
+#   OMB utilise un modèle target-rate : les producteurs envoient à la cadence
+#   définie et OMB mesure la latence réelle (envoi → consommateur).
+#   HdrHistogram capture p50/p99/p99.9 sans omission coordonnée.
+#
+# Limite Artemis :
+#   Le driver artemis-core-client 2.23.1 via OMB ne supporte qu'1P/1C par topic.
+#   Pour approcher le fan-out, on crée N topics distincts (1 par souscription).
+#   Voir METHODOLOGY.md §3 pour les implications sur la comparabilité.
+###############################################################################
+name: A-realtime-transactional
+
+# --- Durée ------------------------------------------------------------------
+warmupDurationMinutes: 2
+testDurationMinutes: 5
+
+# --- Payload ----------------------------------------------------------------
+messageSize: 2048           # ≈ 2 Ko — JSON contrat synthétique
+
+# --- Topologie --------------------------------------------------------------
+# 4 souscriptions = 4 consommateurs en fan-out
+# Artemis : 1P/1C par topic → on crée 4 topics avec 1 producteur chacun
+# Note: la valeur "topics: 4" avec "producersPerTopic: 1" simule le fan-out
+# pour Artemis. Pulsar et RabbitMQ utilisent 1 topic / 4 subscriptions.
+# Documenter dans METHODOLOGY.md la divergence de topologie.
+topics: 1
+producersPerTopic: 1
+consumersPerSubscription: 1
+subscriptionsPerTopic: 4    # 4 souscriptions = compta / notif / reporting / datalake
+
+# --- Balayage de débit (3 paliers) -----------------------------------------
+# OMB exécute le test à producerRate messages/s.
+# Lancer 3 fois avec producerRate=500, 750, 1000 (voir run.sh examples dans README).
+producerRate: 500           # ← changer à 750 puis 1000 pour les deux autres paliers
+
+# --- Backlog ----------------------------------------------------------------
+consumerBacklogSizeGB: 0    # pas de backlog intentionnel (test de latence)
+
+# --- Notes résultats -------------------------------------------------------
+# Comparer : p50 / p99 / p99.9 publish latency + E2E latency à chaque palier.
+# Si p99.9 > 1s à 1000 msg/s → saturation du broker ou du disque.

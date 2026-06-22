@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.0</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>fr.assurance.poc</groupId>
+  <artifactId>insurance-events-app</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <name>insurance-events-app</name>
+  <description>POC Spring Boot — événements contrats assurance via Apache Pulsar</description>
+
+  <properties>
+    <java.version>25</java.version>
+    <!--
+      spring-pulsar 2.0.6 utilise Pulsar client 4.2.2.
+      Le broker dans docker-compose est apachepulsar/pulsar:3.0.17.
+      Le client 4.2.2 négocie le protocole avec le broker 3.0.17 ;
+      les fonctionnalités pub/sub de base sont pleinement supportées.
+    -->
+    <spring-pulsar.version>2.0.6</spring-pulsar.version>
+  </properties>
+
+  <dependencies>
+    <!-- Spring Pulsar -->
+    <dependency>
+      <groupId>org.springframework.pulsar</groupId>
+      <artifactId>spring-pulsar-spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- Web (endpoint HTTP pour émettre des événements de test) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Actuator (healthcheck) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <!-- Tests -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.pulsar</groupId>
+        <artifactId>spring-pulsar-bom</artifactId>
+        <version>${spring-pulsar.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

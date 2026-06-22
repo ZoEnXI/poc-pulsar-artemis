@@ -1,0 +1,60 @@
+###############################################################################
+# Workload B — Rafale batch de règlement
+# Cas d'usage : run nocturne Spring Batch (règlement / clôture comptable)
+#
+# Caractéristiques :
+#   - Payload JSON synthétique ≈ 1.5 Ko (règlement contrat)
+#   - Partitionné par contrat
+#   - Producteur en mode "débit maximum" (producerRate=0 = unlimited)
+#   - Objectif : débit max soutenable AVANT montée de backlog,
+#               puis drain du backlog
+#
+# Scénario en deux temps :
+#   1. Producteur illimité → mesurer le débit publish atteint et le taux
+#      de croissance du backlog (backlogSize en croissance = saturation)
+#   2. consumerBacklogSizeGB > 0 → créer un backlog intentionnel puis
+#      laisser les consommateurs drainer (mesure du drain throughput)
+#
+# Flow control :
+#   - Pulsar : back-pressure via managedLedgerMaxEntriesPerLedger et
+#              quotas de débit broker (non configurés = plein débit local)
+#   - RabbitMQ : address-full-policy via memory watermark
+#   - Artemis : address-full-policy=BLOCK dans broker.xml → le producteur
+#               est bloqué quand max-size-bytes est atteint
+#
+# Limite Artemis :
+#   1P/1C par topic (driver limitation). Le débit max d'Artemis est donc
+#   mesuré en topologie 1P/1C, non parallélisée.
+###############################################################################
+name: B-batch-settlement-burst
+
+# --- Durée ------------------------------------------------------------------
+warmupDurationMinutes: 1
+testDurationMinutes: 8          # 8 min = phase burst + début drain visible
+
+# --- Payload ----------------------------------------------------------------
+messageSize: 1536               # ≈ 1.5 Ko — règlement contrat synthétique
+
+# --- Topologie minimal (Artemis 1P/1C) -------------------------------------
+topics: 1
+producersPerTopic: 1
+consumersPerSubscription: 1
+subscriptionsPerTopic: 1
+
+# --- Débit producteur -------------------------------------------------------
+# producerRate: 0 → OMB envoie aussi vite que possible (unlimited).
+# Mesurer : publishedMessages/s dans les résultats JSON = débit max réel.
+producerRate: 0
+
+# --- Backlog intentionnel ---------------------------------------------------
+# Crée un backlog de 1 Go avant de démarrer les consommateurs.
+# Permet de mesurer la vitesse de drain et l'impact sur la latence.
+consumerBacklogSizeGB: 1
+
+# --- Notes résultats -------------------------------------------------------
+# Observer :
+#   - publishRate   : débit réel atteint (msgs/s)
+#   - backlogSize   : taille du backlog en cours de run
+#   - consumeRate   : vitesse de drain
+#   - publishLatency p99 : latence quand le flow control se déclenche
+#     (Artemis BLOCK → pic de latence visible ; Pulsar → throttle broker)

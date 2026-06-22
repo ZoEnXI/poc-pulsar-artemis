@@ -1,0 +1,26 @@
+###############################################################################
+# Workload SMOKE — validation rapide (< 3 min)
+# Objectif : vérifier que les trois brokers répondent correctement à OMB.
+# Non représentatif des scénarios assurance — sert uniquement de gate CI.
+###############################################################################
+name: smoke
+
+# Durée
+warmupDurationMinutes: 0
+testDurationMinutes: 1
+
+# Charge — très faible pour ne pas saturer le bench local
+producerRate: 100           # msg/s
+messageSize: 1024           # 1 Ko
+
+# Topologie minimale (compatible driver Artemis : 1P / 1C)
+producersPerTopic: 1
+consumersPerSubscription: 1
+topics: 1
+subscriptionsPerTopic: 1
+
+# Backlog
+consumerBacklogSizeGB: 0    # pas de backlog pour le smoke
+
+# Latence — HdrHistogram (géré par OMB, pas de réimplémentation)
+# OMB mesure E2E latence via target-rate + HdrHistogram : voir METHODOLOGY.md

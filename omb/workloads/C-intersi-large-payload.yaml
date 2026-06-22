@@ -1,0 +1,55 @@
+###############################################################################
+# Workload C — Échange inter-SI (CNP ↔ La Banque Postale)
+# Cas d'usage : échanges applicatifs entre systèmes d'information partenaires
+#
+# Caractéristiques :
+#   - Payload JSON synthétique ≈ 32 Ko (dossier client / police agrégée)
+#   - Débit modéré : 100 / 200 / 300 msg/s (charge inter-SI réaliste)
+#   - Durabilité maximale (déjà garantie par la config broker Phase 1)
+#   - Objectif : latence + débit sur gros message
+#
+# Note sur la géo-réplication et la rétention :
+#   Ces deux avantages architecturaux de Pulsar (Geo-Replication native,
+#   stockage découplé tiered-storage) restent QUALITATIFS dans ce benchmark
+#   mono-nœud local. Ils ne sont PAS mesurés ici.
+#   Documentés dans METHODOLOGY.md §5 "Caveats".
+#
+# Payload synthétique :
+#   Les données reproduisent la STRUCTURE d'un échange inter-SI assurance
+#   (police, sinistre, bénéficiaires) mais ne contiennent AUCUNE donnée
+#   réelle CNP ou LBP. Générées aléatoirement par OMB (messageSize).
+#
+# Limite Artemis :
+#   1P/1C par topic — identique aux autres workloads.
+###############################################################################
+name: C-intersi-large-payload
+
+# --- Durée ------------------------------------------------------------------
+warmupDurationMinutes: 2
+testDurationMinutes: 6
+
+# --- Payload ----------------------------------------------------------------
+messageSize: 32768              # 32 Ko — dossier inter-SI synthétique
+
+# --- Topologie minimal (Artemis 1P/1C) -------------------------------------
+topics: 1
+producersPerTopic: 1
+consumersPerSubscription: 1
+subscriptionsPerTopic: 1
+
+# --- Débit producteur -------------------------------------------------------
+# 3 paliers — lancer 3 fois avec différents producerRate :
+#   ./omb/run.sh workloads/C-intersi-large-payload.yaml pulsar    (100)
+#   ./omb/run.sh workloads/C-intersi-large-payload.yaml rabbitmq  (200)
+#   etc.
+producerRate: 100               # ← changer à 200 puis 300 pour les autres paliers
+
+# --- Backlog ----------------------------------------------------------------
+consumerBacklogSizeGB: 0
+
+# --- Notes résultats -------------------------------------------------------
+# Observer :
+#   - publishLatency p50/p99 : impact de la taille du message sur la latence
+#   - Débit en MB/s = producerRate × messageSize (calculé manuellement)
+#   - Comparer : Artemis NIO vs Pulsar BookKeeper journal sur gros payloads
+#   - La bande passante disque locale est le facteur limitant commun → iso

@@ -1,0 +1,31 @@
+###############################################################################
+# OMB Driver — RabbitMQ 4.0.9
+# Client : amqp-client 5.18.0 (driver-rabbitmq/pom.xml d'OMB)
+#
+# Durabilité alignée avec Phase 1 (advanced.config + definitions.json) :
+#   - delivery_mode=2 (persistent) → message stocké disque avant ack
+#   - Publisher confirms activés  → producteur bloqué jusqu'à confirm
+#   - Quorum queues (via policy "quorum-default" dans definitions.json)
+#     → journal Raft fsynced (wal_sync_method=sync dans advanced.config)
+#   - Mono-nœud : x-quorum-initial-group-size=1
+#
+# Topologie :
+#   Le driver RabbitMQ d'OMB supporte plusieurs producteurs/consommateurs
+#   sur la même queue (contrairement au driver Artemis — voir METHODOLOGY.md).
+###############################################################################
+name: RabbitMQ
+
+driverClass: io.openmessaging.benchmark.driver.rabbitmq.RabbitMqBenchmarkDriver
+
+# --- Connexion broker -------------------------------------------------------
+amqpUri: "amqp://guest:guest@rabbitmq:5672/"
+
+# --- Durabilité producteur --------------------------------------------------
+messagePersistence: true          # delivery_mode=2
+publisherConfirms: true           # attendre le confirm du broker avant de continuer
+
+# --- Topologie --------------------------------------------------------------
+# La politique "quorum-default" définie dans definitions.json impose
+# x-queue-type=quorum sur toute nouvelle queue, ce qui s'applique ici
+# automatiquement. Pas besoin de déclaration explicite dans le driver.
+exchange: "benchmark"

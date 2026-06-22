@@ -1,0 +1,143 @@
+###############################################################################
+# Profiles
+#   brokers  — start all three brokers only
+#   bench    — brokers + OMB runner (run via omb/run.sh)
+#   app      — Pulsar broker + Spring Boot POC
+###############################################################################
+
+name: eda-benchmark
+
+x-pulsar-env: &pulsar-env
+  PULSAR_MEM: "-Xms512m -Xmx512m -XX:MaxDirectMemorySize=512m"
+
+services:
+
+  ##############################################################################
+  # PULSAR — standalone mode (broker + embedded bookie + embedded ZK)
+  ##############################################################################
+  pulsar:
+    image: apachepulsar/pulsar:3.0.17
+    container_name: pulsar
+    hostname: pulsar
+    profiles: [brokers, bench, app]
+    command: bin/pulsar standalone
+    environment:
+      <<: *pulsar-env
+    volumes:
+      - ./brokers/pulsar/standalone.conf:/pulsar/conf/standalone.conf:ro
+      - pulsar-data:/pulsar/data
+    ports:
+      - "6650:6650"   # binary protocol
+      - "8080:8080"   # admin REST / function worker
+    healthcheck:
+      test: ["CMD-SHELL", "bin/pulsar-admin brokers healthcheck || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks: [broker-net]
+
+  ##############################################################################
+  # RABBITMQ — 4.0.9 with management UI
+  ##############################################################################
+  rabbitmq:
+    image: rabbitmq:4.0.9-management
+    container_name: rabbitmq
+    hostname: rabbitmq
+    profiles: [brokers, bench]
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - ./brokers/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./brokers/rabbitmq/advanced.config:/etc/rabbitmq/advanced.config:ro
+      - ./brokers/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"   # AMQP 0-9-1
+      - "15672:15672" # management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    networks: [broker-net]
+
+  ##############################################################################
+  # ARTEMIS — 2.36.0 single-node, persistence max durability
+  ##############################################################################
+  artemis:
+    image: apache/activemq-artemis:2.36.0
+    container_name: artemis
+    hostname: artemis
+    profiles: [brokers, bench]
+    environment:
+      ARTEMIS_USER: artemis
+      ARTEMIS_PASSWORD: artemis
+      ANONYMOUS_LOGIN: "false"
+      EXTRA_ARGS: "--no-autotune"
+    volumes:
+      - ./brokers/artemis/broker.xml:/var/lib/artemis-instance/etc/broker.xml:ro
+      - artemis-data:/var/lib/artemis-instance/data
+    ports:
+      - "61616:61616" # Core + OpenWire multiplex
+      - "8161:8161"   # web console
+    healthcheck:
+      test: ["CMD-SHELL", "/var/lib/artemis-instance/bin/artemis check node --up || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks: [broker-net]
+
+  ##############################################################################
+  # OMB RUNNER — JDK 17; invoke via omb/run.sh, not directly
+  ##############################################################################
+  omb-runner:
+    build:
+      context: ./omb
+      dockerfile: Dockerfile
+    container_name: omb-runner
+    profiles: [bench]
+    depends_on:
+      pulsar:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      artemis:
+        condition: service_healthy
+    volumes:
+      - ./omb/drivers:/omb/drivers:ro
+      - ./omb/workloads:/omb/workloads:ro
+      - ./results:/omb/results
+    networks: [broker-net]
+    # Container stays alive; run.sh exec into it
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+  ##############################################################################
+  # APP — Spring Boot POC (spring-pulsar)
+  ##############################################################################
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: insurance-app
+    profiles: [app]
+    depends_on:
+      pulsar:
+        condition: service_healthy
+    environment:
+      SPRING_PULSAR_CLIENT_SERVICE_URL: "pulsar://pulsar:6650"
+    ports:
+      - "8081:8081"
+    networks: [broker-net]
+
+volumes:
+  pulsar-data:
+  rabbitmq-data:
+  artemis-data:
+
+networks:
+  broker-net:
+    driver: bridge

@@ -1,0 +1,34 @@
+# Environment
+.env
+*.env.local
+
+# Build outputs
+target/
+*.jar
+*.war
+*.class
+
+# OMB build cache (OMB itself is a git submodule; its build artefacts stay local)
+omb/benchmark/
+omb/package/
+
+# Results (committed only when publishing a named run)
+results/*.json
+results/*.csv
+results/stats-*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (bind-mounts live in brokers/ but docker data dirs are excluded)
+brokers/pulsar/data/
+brokers/rabbitmq/data/
+brokers/artemis/data/
