@@ -335,6 +335,110 @@
     <div id="ks-summary" style="display:none;margin-top:.75rem;font-size:.82rem"></div>
   </div>
 
+  <!-- Dead Letter Topic -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Dead Letter Topic — protection contre les messages empoisonnés</h2>
+      <span class="note">exclusif Pulsar</span>
+    </div>
+    <div class="feature-badges">
+      <span class="badge yes">✅ Pulsar — DLT natif par subscription</span>
+      <span class="badge no">❌ Artemis — configuration broker manuelle</span>
+    </div>
+    <p class="feature-intro">
+      Quand un consumer appelle <code>negativeAcknowledge()</code> sur un message répétitivement
+      (<code>maxRedeliverCount=2</code>), Pulsar le reroute automatiquement vers un
+      <strong>Dead Letter Topic</strong> dédié — sans perte de données.
+      Ici, 1 message sur 3 simule une erreur de traitement métier.
+      Les messages sains sont acquittés normalement ; les messages empoisonnés atterrissent dans le DLT
+      où un consumer dédié les récupère pour audit ou re-traitement manuel.
+    </p>
+    <div class="params-grid" style="margin-bottom:.75rem">
+      <div class="field">
+        <label for="dlt-messages">Messages</label>
+        <input type="number" id="dlt-messages" value="18" min="6" max="120"/>
+        <div class="field-hint">1/3 sont nackés → DLT</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-bottom:.6rem">
+      <button class="btn btn-pulsar" id="btn-dlt">Démontrer Dead Letter Topic</button>
+    </div>
+    <div id="dlt-error" class="error-box"></div>
+
+    <div class="replay-phases" id="dlt-phases" style="display:none">
+      <div class="phase-row">
+        <div class="phase-icon pending" id="dlt-icon-SENDING">1</div>
+        <div class="phase-label">Envoi des messages</div>
+        <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="dlt-bar-SENDING"></div></div></div>
+        <div class="phase-count" id="dlt-cnt-SENDING">—</div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-icon pending" id="dlt-icon-PROCESSING">2</div>
+        <div class="phase-label">Traitement (ok + nacks)</div>
+        <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="dlt-bar-PROCESSING"></div></div></div>
+        <div class="phase-count" id="dlt-cnt-PROCESSING">—</div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-icon pending" id="dlt-icon-DLT_DRAINING">3</div>
+        <div class="phase-label">Dead Letter Topic drain</div>
+        <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="dlt-bar-DLT_DRAINING" style="background:#f59e0b"></div></div></div>
+        <div class="phase-count" id="dlt-cnt-DLT_DRAINING">—</div>
+      </div>
+    </div>
+    <div id="dlt-stats" style="display:none;margin-top:.8rem;display:none">
+      <div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.78rem">
+        <span style="color:#4ade80">✓ Acquittés&nbsp;: <strong id="dlt-stat-ok">—</strong></span>
+        <span style="color:#f59e0b">↩ Nacks&nbsp;: <strong id="dlt-stat-nacks">—</strong></span>
+        <span style="color:#22d3ee">☠ DLT reçus&nbsp;: <strong id="dlt-stat-dlt">—</strong></span>
+      </div>
+    </div>
+    <div class="replay-summary" id="dlt-summary" style="display:none"></div>
+  </div>
+
+  <!-- Fan-out multi-subscription -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Fan-out multi-subscription — broadcast indépendant</h2>
+      <span class="note">exclusif Pulsar</span>
+    </div>
+    <div class="feature-badges">
+      <span class="badge yes">✅ Pulsar — curseurs indépendants par subscription</span>
+      <span class="badge partial">⚠ Artemis — topics séparés requis</span>
+    </div>
+    <p class="feature-intro">
+      Deux subscriptions de noms différents sur le <strong>même topic</strong> reçoivent chacune
+      l'intégralité du flux, indépendamment l'une de l'autre.
+      <code>audit-trail</code> et <code>analytics-engine</code> partagent le même topic source
+      sans coordination ni duplication de données.
+      Avec Artemis en mode queue, il faudrait deux queues distinctes et un routage applicatif.
+    </p>
+    <div class="params-grid" style="margin-bottom:.75rem">
+      <div class="field">
+        <label for="fo-messages">Messages</label>
+        <input type="number" id="fo-messages" value="30" min="10" max="200"/>
+        <div class="field-hint">reçus × 2 (une fois par subscription)</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-bottom:.6rem">
+      <button class="btn btn-pulsar" id="btn-fanout">Démontrer Fan-out</button>
+    </div>
+    <div id="fo-error" class="error-box"></div>
+
+    <div id="fo-progress" style="display:none;margin-top:.8rem">
+      <div class="broker-row" style="margin-bottom:.4rem">
+        <span class="broker-label pulsar" style="width:130px;font-size:.78rem">audit-trail</span>
+        <div class="progress-track"><div class="progress-fill pulsar" id="fo-fill-1"></div></div>
+        <span class="progress-text" id="fo-txt-1">—</span>
+      </div>
+      <div class="broker-row">
+        <span class="broker-label" style="width:130px;font-size:.78rem;color:#c4b5fd">analytics-engine</span>
+        <div class="progress-track"><div class="progress-fill" id="fo-fill-2" style="background:#c4b5fd"></div></div>
+        <span class="progress-text" id="fo-txt-2">—</span>
+      </div>
+    </div>
+    <div class="replay-summary" id="fo-summary" style="display:none"></div>
+  </div>
+
   <!-- Message Replay -->
   <div class="card">
     <div class="card-header">
@@ -852,6 +956,151 @@
   function markPhaseDone(phase) {
     const icon = document.getElementById('icon-' + phase);
     if (icon) icon.className = 'phase-icon done';
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     DEAD LETTER TOPIC
+     ═══════════════════════════════════════════════════════════ */
+  document.getElementById('btn-dlt').addEventListener('click', () => {
+    startDltDemo(+document.getElementById('dlt-messages').value);
+  });
+
+  function startDltDemo(messages) {
+    const btnDlt  = document.getElementById('btn-dlt');
+    const dltErr  = document.getElementById('dlt-error');
+    const phases  = document.getElementById('dlt-phases');
+    const stats   = document.getElementById('dlt-stats');
+    const summ    = document.getElementById('dlt-summary');
+
+    btnDlt.disabled = true; btnDlt.textContent = 'En cours…';
+    dltErr.style.display = 'none'; summ.style.display = 'none'; summ.innerHTML = '';
+    stats.style.display = 'none';
+    phases.style.display = 'flex';
+
+    ['SENDING','PROCESSING','DLT_DRAINING'].forEach(ph => {
+      document.getElementById('dlt-icon-' + ph).className = 'phase-icon pending';
+      document.getElementById('dlt-bar-' + ph).style.width = '0%';
+      document.getElementById('dlt-cnt-' + ph).textContent = '—';
+    });
+
+    const es = new EventSource(`/pulsar/dlt/stream?messages=${messages}`);
+    let prevPhase = null;
+    // Total deliveries = goodCount×1 + failCount×3  (maxRedeliverCount=2)
+    const failExpected = Math.floor(messages / 3);
+    const goodExpected = messages - failExpected;
+    const totalDeliveries = goodExpected + failExpected * 3;
+
+    es.onmessage = ev => {
+      const d = JSON.parse(ev.data);
+
+      if (d.phase === 'DONE') {
+        es.close();
+        if (prevPhase) markDltPhaseDone(prevPhase);
+        markDltPhaseDone('DLT_DRAINING');
+        stats.style.display = 'block';
+        document.getElementById('dlt-stat-ok').textContent    = d.processed + ' / ' + goodExpected;
+        document.getElementById('dlt-stat-nacks').textContent = d.redeliveries + ' (' + failExpected + ' msg × 3 tentatives)';
+        document.getElementById('dlt-stat-dlt').textContent   = d.inDlt + ' / ' + failExpected;
+        summ.style.display = 'block';
+        summ.innerHTML = d.inDlt === failExpected
+          ? `<strong>✓ ${d.processed} / ${messages} traités normalement · ${d.inDlt} reroutés vers le DLT (0 perte)</strong> — les messages empoisonnés sont récupérables pour audit ou re-traitement.`
+          : `<span style="color:#fca5a5">⚠ ${d.processed} traités · ${d.inDlt} / ${failExpected} reçus depuis DLT.</span>`;
+        btnDlt.disabled = false; btnDlt.textContent = 'Démontrer Dead Letter Topic';
+        return;
+      }
+
+      if (prevPhase && prevPhase !== d.phase) markDltPhaseDone(prevPhase);
+      prevPhase = d.phase;
+      document.getElementById('dlt-icon-' + d.phase).className = 'phase-icon active';
+
+      if (d.phase === 'SENDING') {
+        const pct = d.total > 0 ? Math.round(d.sent / d.total * 100) : 0;
+        document.getElementById('dlt-bar-SENDING').style.width = pct + '%';
+        document.getElementById('dlt-cnt-SENDING').textContent = d.sent + ' / ' + d.total;
+      } else if (d.phase === 'PROCESSING') {
+        const done = d.processed + d.redeliveries;
+        const pct  = totalDeliveries > 0 ? Math.round(done / totalDeliveries * 100) : 0;
+        document.getElementById('dlt-bar-PROCESSING').style.width = pct + '%';
+        document.getElementById('dlt-cnt-PROCESSING').textContent = '✓' + d.processed + ' / ↩' + d.redeliveries;
+        stats.style.display = 'block';
+        document.getElementById('dlt-stat-ok').textContent    = d.processed;
+        document.getElementById('dlt-stat-nacks').textContent = d.redeliveries;
+        document.getElementById('dlt-stat-dlt').textContent   = '—';
+      } else if (d.phase === 'DLT_DRAINING') {
+        const pct = failExpected > 0 ? Math.round(d.inDlt / failExpected * 100) : 0;
+        document.getElementById('dlt-bar-DLT_DRAINING').style.width = pct + '%';
+        document.getElementById('dlt-cnt-DLT_DRAINING').textContent = d.inDlt + ' / ' + failExpected;
+        document.getElementById('dlt-stat-dlt').textContent = d.inDlt;
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      dltErr.textContent = 'Erreur SSE — vérifie les logs.'; dltErr.style.display = 'block';
+      btnDlt.disabled = false; btnDlt.textContent = 'Démontrer Dead Letter Topic';
+    };
+  }
+
+  function markDltPhaseDone(phase) {
+    const icon = document.getElementById('dlt-icon-' + phase);
+    if (icon) icon.className = 'phase-icon done';
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     FAN-OUT
+     ═══════════════════════════════════════════════════════════ */
+  document.getElementById('btn-fanout').addEventListener('click', () => {
+    startFanOutDemo(+document.getElementById('fo-messages').value);
+  });
+
+  function startFanOutDemo(messages) {
+    const btnFo = document.getElementById('btn-fanout');
+    const foErr = document.getElementById('fo-error');
+    const foPrg = document.getElementById('fo-progress');
+    const foSum = document.getElementById('fo-summary');
+
+    btnFo.disabled = true; btnFo.textContent = 'En cours…';
+    foErr.style.display = 'none'; foSum.style.display = 'none'; foSum.innerHTML = '';
+    foPrg.style.display = 'block';
+    ['fo-fill-1','fo-fill-2'].forEach(id => document.getElementById(id).style.width = '0%');
+    document.getElementById('fo-txt-1').textContent = 'en attente…';
+    document.getElementById('fo-txt-2').textContent = 'en attente…';
+
+    const es = new EventSource(`/pulsar/fanout/stream?messages=${messages}`);
+    es.onmessage = ev => {
+      const d = JSON.parse(ev.data);
+
+      if (d.type === 'sending') {
+        const pct = d.total > 0 ? Math.round(d.sent / d.total * 100) : 0;
+        document.getElementById('fo-txt-1').textContent = 'envoi ' + d.sent + '/' + d.total + '…';
+        document.getElementById('fo-txt-2').textContent = 'envoi ' + d.sent + '/' + d.total + '…';
+        document.getElementById('fo-fill-1').style.width = (pct / 2) + '%';
+        document.getElementById('fo-fill-2').style.width = (pct / 2) + '%';
+        return;
+      }
+
+      const p1 = d.total > 0 ? Math.round(d.sub1Received / d.total * 100) : 0;
+      const p2 = d.total > 0 ? Math.round(d.sub2Received / d.total * 100) : 0;
+      document.getElementById('fo-fill-1').style.width = p1 + '%';
+      document.getElementById('fo-fill-2').style.width = p2 + '%';
+      document.getElementById('fo-txt-1').textContent = d.sub1Received + ' / ' + d.total;
+      document.getElementById('fo-txt-2').textContent = d.sub2Received + ' / ' + d.total;
+
+      if (d.type === 'done') {
+        es.close();
+        foSum.style.display = 'block';
+        foSum.innerHTML = (d.sub1Received === d.total && d.sub2Received === d.total)
+          ? `<strong>✓ Les deux subscriptions ont reçu ${d.total} / ${d.total} messages de façon indépendante</strong> — un seul topic, deux curseurs, aucune coordination nécessaire.`
+          : `<span style="color:#fca5a5">⚠ audit-trail: ${d.sub1Received} · analytics-engine: ${d.sub2Received} / ${d.total}</span>`;
+        btnFo.disabled = false; btnFo.textContent = 'Démontrer Fan-out';
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      foErr.textContent = 'Erreur SSE — vérifie les logs.'; foErr.style.display = 'block';
+      btnFo.disabled = false; btnFo.textContent = 'Démontrer Fan-out';
+    };
   }
 
   /* ═══════════════════════════════════════════════════════════

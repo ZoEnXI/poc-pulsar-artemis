@@ -57,4 +57,40 @@ public class PulsarFeaturesController {
         });
         return emitter;
     }
+
+    @GetMapping(value = "/pulsar/dlt/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @ResponseBody
+    public SseEmitter dltStream(
+            @RequestParam(defaultValue = "18") int messages
+    ) {
+        SseEmitter emitter = new SseEmitter(120_000L);
+        Executors.newSingleThreadExecutor().submit(() -> {
+            try {
+                service.demoDeadLetterTopic(messages, evt -> {
+                    try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(evt))); }
+                    catch (Exception e) { emitter.completeWithError(e); }
+                });
+                emitter.complete();
+            } catch (Exception e) { emitter.completeWithError(e); }
+        });
+        return emitter;
+    }
+
+    @GetMapping(value = "/pulsar/fanout/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @ResponseBody
+    public SseEmitter fanOutStream(
+            @RequestParam(defaultValue = "30") int messages
+    ) {
+        SseEmitter emitter = new SseEmitter(120_000L);
+        Executors.newSingleThreadExecutor().submit(() -> {
+            try {
+                service.demoFanOut(messages, evt -> {
+                    try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(evt))); }
+                    catch (Exception e) { emitter.completeWithError(e); }
+                });
+                emitter.complete();
+            } catch (Exception e) { emitter.completeWithError(e); }
+        });
+        return emitter;
+    }
 }
