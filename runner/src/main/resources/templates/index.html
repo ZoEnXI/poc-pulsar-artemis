@@ -170,7 +170,10 @@
 </head>
 <body>
 
-<h1>POC EDA Benchmark — <span>Artemis vs Pulsar</span></h1>
+<div style="display:flex;align-items:baseline;gap:1rem;margin-bottom:1.5rem">
+  <h1 style="margin-bottom:0">POC EDA Benchmark — <span>Artemis vs Pulsar</span></h1>
+  <span id="mode-badge" class="badge unknown"><span class="badge-dot"></span>Mode : …</span>
+</div>
 
 <!-- ── Tab navigation ─────────────────────────────────────────── -->
 <div class="tabs">
@@ -697,6 +700,21 @@
     } catch (_) {}
   }
   loadDurability();
+
+  async function loadMode() {
+    try {
+      const d = await (await fetch('/benchmark/mode')).json();
+      const el = document.getElementById('mode-badge');
+      if (d.mode === 'external') {
+        el.className = 'badge ready';
+        el.innerHTML = '<span class="badge-dot"></span>Mode : External (Docker)';
+      } else {
+        el.className = 'badge partial';
+        el.innerHTML = '<span class="badge-dot"></span>Mode : Embedded (même JVM)';
+      }
+    } catch (_) {}
+  }
+  loadMode();
 
   btnInit.addEventListener('click', async () => {
     btnInit.disabled = true;

@@ -1,6 +1,6 @@
 package fr.assurance.runner.pulsar;
 
-import fr.assurance.pulsar.EmbeddedPulsarServer;
+import fr.assurance.runner.BrokerProperties;
 import org.apache.pulsar.client.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,13 +18,13 @@ public class PulsarFeaturesService {
     private static final String[] KEYS = {"CTR-A", "CTR-B", "CTR-C", "CTR-D", "CTR-E", "CTR-F"};
     private static final String DEMO_NS = "public/demo";
 
-    private final EmbeddedPulsarServer pulsarServer;
+    private final BrokerProperties brokers;
 
     // Mutex : une seule démo Pulsar à la fois pour isoler les mesures
     private final AtomicBoolean featureRunning = new AtomicBoolean(false);
 
-    public PulsarFeaturesService(EmbeddedPulsarServer pulsarServer) {
-        this.pulsarServer = pulsarServer;
+    public PulsarFeaturesService(BrokerProperties brokers) {
+        this.brokers = brokers;
     }
 
     private String uniqueTopic(String prefix) {
@@ -43,7 +43,7 @@ public class PulsarFeaturesService {
             String sub   = "ks-sub";
 
             PulsarClient client = PulsarClient.builder()
-                    .serviceUrl(pulsarServer.getBrokerUrl())
+                    .serviceUrl(brokers.pulsarUrl())
                     .build();
             try {
                 // Tous les consumers doivent être créés AVANT le producteur
@@ -137,7 +137,7 @@ public class PulsarFeaturesService {
             String sub   = "replay-sub";
 
             PulsarClient client = PulsarClient.builder()
-                    .serviceUrl(pulsarServer.getBrokerUrl())
+                    .serviceUrl(brokers.pulsarUrl())
                     .build();
             try {
                 org.apache.pulsar.client.api.Consumer<byte[]> consumer = client.newConsumer()
@@ -216,7 +216,7 @@ public class PulsarFeaturesService {
             final int totalDeliveries = goodExpected + failExpected * (MAX_REDELIVER + 1);
 
             PulsarClient client = PulsarClient.builder()
-                    .serviceUrl(pulsarServer.getBrokerUrl())
+                    .serviceUrl(brokers.pulsarUrl())
                     .build();
             try {
                 org.apache.pulsar.client.api.Consumer<byte[]> dltConsumer = client.newConsumer()
@@ -301,7 +301,7 @@ public class PulsarFeaturesService {
             String topic = uniqueTopic("fanout");
 
             PulsarClient client = PulsarClient.builder()
-                    .serviceUrl(pulsarServer.getBrokerUrl())
+                    .serviceUrl(brokers.pulsarUrl())
                     .build();
             try {
                 org.apache.pulsar.client.api.Consumer<byte[]> auditConsumer = client.newConsumer()

@@ -3,8 +3,6 @@ package fr.assurance.runner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import fr.assurance.artemis.ArtemisBenchmarkClient;
-import fr.assurance.artemis.EmbeddedArtemisServer;
-import fr.assurance.pulsar.EmbeddedPulsarServer;
 import fr.assurance.pulsar.PulsarBenchmarkClient;
 import fr.assurance.runner.domain.ContratEvent;
 import fr.assurance.runner.domain.ContratEvent.EventType;
@@ -30,16 +28,14 @@ public class BenchmarkService {
     private static final int[]    SWEEP_SIZES  = {128, 1024, 10240, 65536};
     private static final String[] SWEEP_LABELS = {"128 B", "1 KB", "10 KB", "64 KB"};
 
-    private final EmbeddedArtemisServer artemisServer;
-    private final EmbeddedPulsarServer  pulsarServer;
+    private final BrokerProperties brokers;
     private final ObjectMapper mapper;
 
     // Mutex : un seul benchmark (streaming ou sweep) à la fois
     private final AtomicBoolean benchmarkRunning = new AtomicBoolean(false);
 
-    public BenchmarkService(EmbeddedArtemisServer artemisServer, EmbeddedPulsarServer pulsarServer) {
-        this.artemisServer = artemisServer;
-        this.pulsarServer  = pulsarServer;
+    public BenchmarkService(BrokerProperties brokers) {
+        this.brokers = brokers;
         this.mapper = new ObjectMapper()
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
                 .findAndRegisterModules();
@@ -57,14 +53,14 @@ public class BenchmarkService {
     }
 
     private String probeArtemis() {
-        try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) {
+        try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(brokers.artemisUrl())) {
             c.sendAndMeasureBoth(new byte[]{1});
             return "READY";
         } catch (Exception e) { return "ERROR: " + e.getMessage(); }
     }
 
     private String probePulsar() {
-        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) {
+        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(brokers.pulsarUrl())) {
             c.sendAndMeasureBoth(new byte[]{1}, "health");
             return "READY";
         } catch (Exception e) { return "ERROR: " + e.getMessage(); }
@@ -74,8 +70,8 @@ public class BenchmarkService {
 
     public Map<String, String> durabilityInfo() {
         Map<String, String> info = new LinkedHashMap<>();
-        info.put("artemis", artemisServer.isPersistent() ? "journal (tmpdir, no fsync)" : "in-memory");
-        info.put("pulsar",  "BookKeeper (tmpdir, no fsync)");
+        info.put("artemis", brokers.artemisDurability());
+        info.put("pulsar",  brokers.pulsarDurability());
         return info;
     }
 
@@ -227,7 +223,7 @@ public class BenchmarkService {
     // recvNs[i] correspond à sendNs[i] par position (pas besoin de seqno dans le message).
 
     private BenchmarkResult.BrokerMetrics benchmarkArtemis(byte[] payload, int warmup, int messages) throws Exception {
-        try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) {
+        try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(brokers.artemisUrl())) {
             warmupArtemis(c, payload, warmup);
             int n = messages;
             long[] pub    = new long[n];
@@ -263,7 +259,7 @@ public class BenchmarkService {
     private BenchmarkResult.BrokerMetrics benchmarkArtemisWithProgress(byte[] payload, BenchmarkParams p,
             int run, int totalRuns, Consumer<BenchmarkProgress> cb) throws Exception {
         int n = p.messages();
-        try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) {
+        try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(brokers.artemisUrl())) {
             warmupArtemis(c, payload, p.warmup());
             long[] pub    = new long[n];
             long[] sendNs = new long[n];
@@ -308,7 +304,7 @@ public class BenchmarkService {
         int threads = p.producerCount(), perThread = p.messages() / threads, actual = perThread * threads;
         log.info("Artemis par: {} × {} = {} msgs (run {}/{})", threads, perThread, actual, run, totalRuns);
 
-        try (ArtemisBenchmarkClient wc = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) {
+        try (ArtemisBenchmarkClient wc = new ArtemisBenchmarkClient(brokers.artemisUrl())) {
             warmupArtemis(wc, payload, p.warmup());
         }
 
@@ -322,7 +318,7 @@ public class BenchmarkService {
         for (int t = 0; t < threads; t++) {
             final int tid = t;
             pool.submit(() -> {
-                try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl(), true)) {
+                try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(brokers.artemisUrl(), true)) {
                     for (int i = 0; i < perThread; i++) { tlat[tid][i] = c.sendAndMeasure(payload); sent.incrementAndGet(); }
                 } catch (Exception e) { err.compareAndSet(null, e); } finally { done.countDown(); }
             });
@@ -333,7 +329,7 @@ public class BenchmarkService {
         if (err.get() != null) throw err.get();
 
         long elapsed = System.nanoTime() - t0;
-        try (ArtemisBenchmarkClient dc = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) { dc.drain(actual, 60_000); }
+        try (ArtemisBenchmarkClient dc = new ArtemisBenchmarkClient(brokers.artemisUrl())) { dc.drain(actual, 60_000); }
 
         long[] all = merge(tlat, threads, perThread);
         return toMetrics(actual, all, EMPTY, elapsed);
@@ -346,7 +342,7 @@ public class BenchmarkService {
     // les timestamps sendNs[i] et recvNs[i] corrélés par le seqno (= la key).
 
     private BenchmarkResult.BrokerMetrics benchmarkPulsar(byte[] payload, int warmup, int messages) throws Exception {
-        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) {
+        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(brokers.pulsarUrl())) {
             warmupPulsar(c, payload, warmup);
             int n = messages;
             long[] pub    = new long[n];
@@ -381,7 +377,7 @@ public class BenchmarkService {
     private BenchmarkResult.BrokerMetrics benchmarkPulsarWithProgress(byte[] payload, BenchmarkParams p,
             int run, int totalRuns, Consumer<BenchmarkProgress> cb) throws Exception {
         int n = p.messages();
-        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) {
+        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(brokers.pulsarUrl())) {
             warmupPulsar(c, payload, p.warmup());
             long[] pub    = new long[n];
             long[] sendNs = new long[n];
@@ -450,7 +446,7 @@ public class BenchmarkService {
         int threads = p.producerCount(), perThread = p.messages() / threads, actual = perThread * threads;
         log.info("Pulsar par: {} × {} = {} msgs (run {}/{})", threads, perThread, actual, run, totalRuns);
 
-        try (PulsarBenchmarkClient wc = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) {
+        try (PulsarBenchmarkClient wc = new PulsarBenchmarkClient(brokers.pulsarUrl())) {
             warmupPulsar(wc, payload, p.warmup());
         }
 
@@ -464,7 +460,7 @@ public class BenchmarkService {
         for (int t = 0; t < threads; t++) {
             final int tid = t;
             pool.submit(() -> {
-                try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl(), true)) {
+                try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(brokers.pulsarUrl(), true)) {
                     for (int i = 0; i < perThread; i++) { tlat[tid][i] = c.sendAndMeasure(payload, "t" + tid + "k" + i); sent.incrementAndGet(); }
                 } catch (Exception e) { err.compareAndSet(null, e); } finally { done.countDown(); }
             });
@@ -475,7 +471,7 @@ public class BenchmarkService {
         if (err.get() != null) throw err.get();
 
         long elapsed = System.nanoTime() - t0;
-        try (PulsarBenchmarkClient dc = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) { dc.drain(actual, 60_000); }
+        try (PulsarBenchmarkClient dc = new PulsarBenchmarkClient(brokers.pulsarUrl())) { dc.drain(actual, 60_000); }
 
         long[] all = merge(tlat, threads, perThread);
         return toMetrics(actual, all, EMPTY, elapsed);

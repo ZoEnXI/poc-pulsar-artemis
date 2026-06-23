@@ -4,9 +4,11 @@ import fr.assurance.artemis.EmbeddedArtemisServer;
 import fr.assurance.pulsar.EmbeddedPulsarServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Profile;
 
 @SpringBootApplication
 public class RunnerApplication {
@@ -18,6 +20,7 @@ public class RunnerApplication {
     }
 
     @Bean(destroyMethod = "close")
+    @Profile("!external")
     EmbeddedArtemisServer artemisServer() throws Exception {
         EmbeddedArtemisServer server = new EmbeddedArtemisServer();
         server.start();
@@ -25,9 +28,32 @@ public class RunnerApplication {
     }
 
     @Bean(destroyMethod = "close")
+    @Profile("!external")
     EmbeddedPulsarServer pulsarServer() throws Exception {
         EmbeddedPulsarServer server = new EmbeddedPulsarServer();
         server.start();
         return server;
+    }
+
+    @Bean
+    @Profile("!external")
+    BrokerProperties embeddedBrokerProperties(EmbeddedArtemisServer artemisServer,
+                                               EmbeddedPulsarServer pulsarServer) {
+        return new BrokerProperties(
+                "embedded",
+                artemisServer.getBrokerUrl(),
+                pulsarServer.getBrokerUrl(),
+                artemisServer.isPersistent() ? "journal (tmpdir, fsync off)" : "in-memory",
+                "BookKeeper (tmpdir, fsync off)");
+    }
+
+    @Bean
+    @Profile("external")
+    BrokerProperties externalBrokerProperties(
+            @Value("${broker.artemis.url}") String artemisUrl,
+            @Value("${broker.pulsar.url}") String pulsarUrl,
+            @Value("${broker.artemis.durability}") String artemisDurability,
+            @Value("${broker.pulsar.durability}") String pulsarDurability) {
+        return new BrokerProperties("external", artemisUrl, pulsarUrl, artemisDurability, pulsarDurability);
     }
 }

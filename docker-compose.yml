@@ -1,0 +1,28 @@
+services:
+
+  artemis:
+    image: apache/activemq-artemis:2.36.0
+    environment:
+      ARTEMIS_USER: artemis
+      ARTEMIS_PASSWORD: artemis
+      ANONYMOUS_LOGIN: "true"
+    ports:
+      - "61616:61616"   # Core protocol (OpenWire/STOMP also available)
+      - "8161:8161"     # Web console
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8161/console || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  pulsar:
+    image: apachepulsar/pulsar:4.0.0
+    command: bin/pulsar standalone --no-functions-worker
+    ports:
+      - "6650:6650"     # Binary protocol
+      - "8081:8080"     # Admin REST (8081 pour éviter conflit avec Spring Boot :8080)
+    healthcheck:
+      test: ["CMD-SHELL", "bin/pulsar-admin brokers healthcheck 2>/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20

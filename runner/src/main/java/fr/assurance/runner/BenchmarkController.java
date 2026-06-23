@@ -20,6 +20,7 @@ public class BenchmarkController {
 
     private final BenchmarkService service;
     private final ObjectMapper mapper;
+    private final BrokerProperties brokers;
 
     private static final AtomicInteger THREAD_COUNT = new AtomicInteger();
     private static final ThreadFactory DAEMON_FACTORY = r -> {
@@ -31,9 +32,10 @@ public class BenchmarkController {
     // Pool partagé (single-thread) : le mutex dans BenchmarkService empêche les doublons.
     private final ExecutorService executor = Executors.newSingleThreadExecutor(DAEMON_FACTORY);
 
-    public BenchmarkController(BenchmarkService service, ObjectMapper mapper) {
+    public BenchmarkController(BenchmarkService service, ObjectMapper mapper, BrokerProperties brokers) {
         this.service = service;
         this.mapper  = mapper;
+        this.brokers = brokers;
     }
 
     @PreDestroy
@@ -43,6 +45,10 @@ public class BenchmarkController {
 
     @GetMapping("/")
     public String index() { return "index"; }
+
+    @GetMapping("/benchmark/mode")
+    @ResponseBody
+    public Map<String, String> mode() { return Map.of("mode", brokers.mode()); }
 
     @GetMapping("/benchmark/health")
     @ResponseBody
