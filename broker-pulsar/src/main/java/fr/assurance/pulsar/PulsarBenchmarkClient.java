@@ -4,6 +4,8 @@ import org.apache.pulsar.client.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 public class PulsarBenchmarkClient implements AutoCloseable {
@@ -50,8 +52,53 @@ public class PulsarBenchmarkClient implements AutoCloseable {
     }
 
     /**
-     * Envoie un message et attend sa réception par le consumer.
-     * @return [pubLatencyNs, e2eLatencyNs]  (e2e >= pub)
+     * Envoie un message et retourne {sendNs, pubLatNs}.
+     * Utilisé pour les benchmarks concurrents : le consumer tourne en parallèle
+     * sur un thread séparé, sans bloquer le producteur entre chaque message.
+     */
+    public long[] sendAndRecord(byte[] payload, String key) throws PulsarClientException {
+        long t0 = System.nanoTime();
+        producer.newMessage().key(key).value(payload).send();
+        return new long[]{t0, System.nanoTime() - t0};
+    }
+
+    /**
+     * Démarre un thread daemon qui consomme n messages.
+     * Chaque message doit avoir une key parseable en entier (seqno dans [0, n-1]).
+     * @return Future complété avec un tableau recvNs[seqno] = nanoTime à la réception.
+     */
+    public Future<long[]> consumeAsync(int n) {
+        if (consumer == null) throw new IllegalStateException("consumeAsync() requires producerOnly=false");
+        CompletableFuture<long[]> future = new CompletableFuture<>();
+        Thread t = new Thread(() -> {
+            long[] recvNs = new long[n];
+            int received = 0;
+            try {
+                while (received < n) {
+                    Message<byte[]> m = consumer.receive(60, TimeUnit.SECONDS);
+                    if (m == null) break;
+                    consumer.acknowledge(m);
+                    try {
+                        int seq = Integer.parseInt(m.getKey());
+                        if (seq >= 0 && seq < n) {
+                            recvNs[seq] = System.nanoTime();
+                            received++;
+                        }
+                    } catch (NumberFormatException ignored) { }
+                }
+                future.complete(recvNs);
+            } catch (PulsarClientException e) {
+                future.completeExceptionally(e);
+            }
+        }, "pulsar-recv-async");
+        t.setDaemon(true);
+        t.start();
+        return future;
+    }
+
+    /**
+     * Health check uniquement : envoie 1 message et attend sa réception (stop-and-wait).
+     * Ne pas utiliser pour les benchmarks — voir sendAndRecord + consumeAsync.
      */
     public long[] sendAndMeasureBoth(byte[] payload, String key) throws PulsarClientException {
         if (consumer == null) throw new IllegalStateException("sendAndMeasureBoth() requires producerOnly=false");

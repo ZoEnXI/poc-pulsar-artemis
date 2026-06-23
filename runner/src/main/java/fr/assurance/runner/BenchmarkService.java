@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+
 @Service
 public class BenchmarkService {
 
@@ -264,13 +265,34 @@ public class BenchmarkService {
         cb.accept(finalEvt("artemis", actual, all, EMPTY, elapsed, 1, 1));
     }
 
-    // ── Pulsar — single producer, E2E mesuré ──────────────────────────────────
+    // ── Pulsar — single producer, consumer concurrent ─────────────────────────
+    //
+    // On ne fait plus de stop-and-wait (send → attendre consumer → send suivant),
+    // qui plafonnait le débit à 1000 / e2eMs ≈ 65 msg/s.
+    // Le consumer tourne sur un thread daemon pendant que le producteur envoie
+    // tous les messages en séquence. L'e2e est calculé message par message via
+    // les timestamps sendNs[i] et recvNs[i] corrélés par le seqno (= la key).
 
     private BenchmarkResult.BrokerMetrics benchmarkPulsar(byte[] payload, int warmup, int messages) throws Exception {
         try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) {
             warmupPulsar(c, payload, warmup);
-            long[][] lats = measurePulsar(c, payload, messages);
-            return toMetrics(messages, lats[0], lats[1], wallTime(lats[0]));
+            int n = messages;
+            long[] pub    = new long[n];
+            long[] sendNs = new long[n];
+
+            Future<long[]> recvFuture = c.consumeAsync(n);
+
+            long t0 = System.nanoTime();
+            for (int i = 0; i < n; i++) {
+                long[] sr = c.sendAndRecord(payload, String.valueOf(i));
+                sendNs[i] = sr[0];
+                pub[i]    = sr[1];
+            }
+            long sendElapsed = System.nanoTime() - t0;
+
+            long[] recvNs = recvFuture.get(60, TimeUnit.SECONDS);
+            long[] e2e    = computeE2e(pub, sendNs, recvNs, n);
+            return toMetrics(n, pub, e2e, sendElapsed);
         }
     }
 
@@ -278,15 +300,24 @@ public class BenchmarkService {
         int n = p.messages();
         try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) {
             warmupPulsar(c, payload, p.warmup());
-            long[] pub = new long[n], e2e = new long[n];
+            long[] pub    = new long[n];
+            long[] sendNs = new long[n];
+
+            Future<long[]> recvFuture = c.consumeAsync(n);
+
             long t0 = System.nanoTime();
             for (int i = 0; i < n; i++) {
-                long[] both = c.sendAndMeasureBoth(payload, "k" + i);
-                pub[i] = both[0]; e2e[i] = both[1];
+                long[] sr = c.sendAndRecord(payload, String.valueOf(i));
+                sendNs[i] = sr[0];
+                pub[i]    = sr[1];
                 if ((i + 1) % REPORT_INTERVAL == 0)
-                    cb.accept(partial("pulsar", i + 1, n, pub, e2e, System.nanoTime() - t0, 1, 1));
+                    cb.accept(partial("pulsar", i + 1, n, pub, new long[0], System.nanoTime() - t0, 1, 1));
             }
-            cb.accept(finalEvt("pulsar", n, pub, e2e, System.nanoTime() - t0, 1, 1));
+            long sendElapsed = System.nanoTime() - t0;
+
+            long[] recvNs = recvFuture.get(60, TimeUnit.SECONDS);
+            long[] e2e    = computeE2e(pub, sendNs, recvNs, n);
+            cb.accept(finalEvt("pulsar", n, pub, e2e, sendElapsed, 1, 1));
         }
     }
 
@@ -295,13 +326,13 @@ public class BenchmarkService {
         c.drain(warmup, 10_000);
     }
 
-    private static long[][] measurePulsar(PulsarBenchmarkClient c, byte[] payload, int n) throws Exception {
-        long[] pub = new long[n], e2e = new long[n];
+    /** e2e[i] = max(recvNs[i] - sendNs[i], pub[i]) ; fallback sur pub si recvNs manquant. */
+    private static long[] computeE2e(long[] pub, long[] sendNs, long[] recvNs, int n) {
+        long[] e2e = new long[n];
         for (int i = 0; i < n; i++) {
-            long[] both = c.sendAndMeasureBoth(payload, "k" + i);
-            pub[i] = both[0]; e2e[i] = both[1];
+            e2e[i] = recvNs[i] > 0 ? Math.max(recvNs[i] - sendNs[i], pub[i]) : pub[i];
         }
-        return new long[][]{pub, e2e};
+        return e2e;
     }
 
     // ── Pulsar — parallel producers (pub latency only) ────────────────────────
