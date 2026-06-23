@@ -26,6 +26,16 @@
       <version>${pulsar.version}</version>
     </dependency>
     <!-- pulsar-client est transitif via pulsar-broker, pas besoin du fat-jar shaded -->
+    <!--
+      stream-storage-common est exclu transitivement via stream-storage-java-client
+      dans le parent pom (exclusion anti-gRPC), mais LocalBookkeeperEnsemble en a besoin
+      à l'exécution pour NamespaceNotFoundException. On le ré-ajoute explicitement.
+    -->
+    <dependency>
+      <groupId>org.apache.bookkeeper</groupId>
+      <artifactId>stream-storage-common</artifactId>
+      <version>4.16.6</version>
+    </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>
