@@ -5,120 +5,198 @@
              https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
+  <!--
+    Projet mono-module : plus de hiérarchie broker-artemis / broker-pulsar / runner.
+    Les sources des trois anciens modules sont déclarées via build-helper-maven-plugin.
+    Avantage : spring-boot:run résout le classpath depuis ce seul pom.xml,
+    sans jamais consulter un POM installé dans ~/.m2.
+  -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.5</version>
+    <relativePath/>
+  </parent>
+
   <groupId>fr.assurance</groupId>
   <artifactId>poc-pulsar-artemis</artifactId>
   <version>1.0-SNAPSHOT</version>
-  <packaging>pom</packaging>
-
-  <modules>
-    <module>broker-artemis</module>
-    <module>broker-pulsar</module>
-    <module>runner</module>
-  </modules>
+  <packaging>jar</packaging>
 
   <properties>
     <java.version>17</java.version>
-    <maven.compiler.release>17</maven.compiler.release>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-
     <artemis.version>2.36.0</artemis.version>
-    <!-- 3.3.5 : LTS stable, dépendances internes homogènes (pas de conflit gRPC) -->
-    <pulsar.version>3.3.5</pulsar.version>
-    <jackson.version>2.17.2</jackson.version>
-    <slf4j.version>2.0.13</slf4j.version>
-    <logback.version>1.5.6</logback.version>
-    <spring-boot.version>3.3.5</spring-boot.version>
+    <pulsar.version>4.2.2</pulsar.version>
   </properties>
 
+  <!--
+    Spring Boot 3.3.5 gère des versions que Pulsar 4.2.2 ne peut pas utiliser.
+    Les entries EXPLICITES ici ont la priorité maximale et overrident le parent.
+    - commons-lang3 : Spring Boot 3.14 → Pulsar a besoin de 3.19 (getIfNull(T,T))
+    - Jersey         : Spring Boot force Jersey 3 (jakarta.*) → Pulsar 4.x utilise
+                       Jersey 2.42 (javax.ws.rs via jakarta.ws.rs-api 2.1.6)
+  -->
   <dependencyManagement>
     <dependencies>
-      <!-- Spring Boot BOM — utilisé uniquement par le module runner -->
+
       <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-dependencies</artifactId>
-        <version>${spring-boot.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-lang3</artifactId>
+        <version>3.19.0</version>
       </dependency>
 
-      <!-- Override Spring Boot BOM's Pulsar version + exclude components unused here -->
-      <dependency>
-        <groupId>org.apache.pulsar</groupId>
-        <artifactId>pulsar-broker</artifactId>
-        <version>${pulsar.version}</version>
-        <exclusions>
-          <!-- stream-storage-server: BookKeeper streaming storage, not needed for Pulsar standalone -->
-          <exclusion>
-            <groupId>org.apache.bookkeeper</groupId>
-            <artifactId>stream-storage-server</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>org.apache.bookkeeper</groupId>
-            <artifactId>stream-storage-java-client</artifactId>
-          </exclusion>
-          <!-- pulsar-functions-worker: brings in grpc-all with hard version constraint -->
-          <exclusion>
-            <groupId>org.apache.pulsar</groupId>
-            <artifactId>pulsar-functions-worker</artifactId>
-          </exclusion>
-        </exclusions>
-      </dependency>
+      <!-- Jersey 2.42 (javax.ws.rs EE8, compatible Jetty 12 EE8) -->
+      <dependency><groupId>org.glassfish.jersey.core</groupId><artifactId>jersey-server</artifactId><version>2.42</version></dependency>
+      <dependency><groupId>org.glassfish.jersey.core</groupId><artifactId>jersey-client</artifactId><version>2.42</version></dependency>
+      <dependency><groupId>org.glassfish.jersey.core</groupId><artifactId>jersey-common</artifactId><version>2.42</version></dependency>
+      <dependency><groupId>org.glassfish.jersey.containers</groupId><artifactId>jersey-container-servlet-core</artifactId><version>2.42</version></dependency>
+      <dependency><groupId>org.glassfish.jersey.containers</groupId><artifactId>jersey-container-servlet</artifactId><version>2.42</version></dependency>
+      <dependency><groupId>org.glassfish.jersey.media</groupId><artifactId>jersey-media-json-jackson</artifactId><version>2.42</version></dependency>
+      <dependency><groupId>org.glassfish.jersey.media</groupId><artifactId>jersey-media-multipart</artifactId><version>2.42</version></dependency>
+      <dependency><groupId>org.glassfish.jersey.ext</groupId><artifactId>jersey-entity-filtering</artifactId><version>2.42</version></dependency>
+      <dependency><groupId>org.glassfish.jersey.inject</groupId><artifactId>jersey-hk2</artifactId><version>2.42</version></dependency>
+      <!-- JAX-RS 2.1 API (javax.ws.rs.* namespace, alias Jakarta EE 8) -->
+      <dependency><groupId>jakarta.ws.rs</groupId><artifactId>jakarta.ws.rs-api</artifactId><version>2.1.6</version></dependency>
 
-      <!-- Modules locaux -->
-      <dependency>
-        <groupId>fr.assurance</groupId>
-        <artifactId>broker-artemis</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>fr.assurance</groupId>
-        <artifactId>broker-pulsar</artifactId>
-        <version>${project.version}</version>
-      </dependency>
+      <!-- Jetty core : Spring Boot 3.3.5 = 12.0.14, Pulsar 4.2.2 = 12.1.10.
+           NetworkConnectionLimit et d'autres classes ajoutées en 12.1.x. -->
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-server</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-http</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-io</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-util</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-util-ajax</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-security</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-client</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-alpn-client</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-alpn-server</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-alpn-conscrypt-server</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-xml</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-plus</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-jndi</artifactId><version>12.1.10</version></dependency>
+      <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-annotations</artifactId><version>12.1.10</version></dependency>
 
-      <!-- Logging commun -->
-      <dependency>
-        <groupId>org.slf4j</groupId>
-        <artifactId>slf4j-api</artifactId>
-        <version>${slf4j.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>ch.qos.logback</groupId>
-        <artifactId>logback-classic</artifactId>
-        <version>${logback.version}</version>
-      </dependency>
+      <!-- OpenTelemetry : Spring Boot 3.3.5 = 1.37, Pulsar 4.2.2 = 1.56.
+           Le mismatch api/api-incubator cause NoClassDefFoundError EventLoggerProvider.
+           On aligne TOUT sur 1.56.0 (même majeure, compatible Spring Boot Actuator). -->
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-api</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-context</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-sdk</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-sdk-common</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-sdk-trace</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-sdk-metrics</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-sdk-logs</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-sdk-extension-autoconfigure</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-sdk-extension-autoconfigure-spi</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-api-incubator</artifactId><version>1.56.0-alpha</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-exporter-otlp</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-exporter-otlp-common</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-exporter-common</artifactId><version>1.56.0</version></dependency>
+      <dependency><groupId>io.opentelemetry.semconv</groupId><artifactId>opentelemetry-semconv</artifactId><version>1.32.0</version></dependency>
+      <dependency><groupId>io.opentelemetry.semconv</groupId><artifactId>opentelemetry-semconv-incubating</artifactId><version>1.32.0</version></dependency>
 
-      <!-- Jackson partagé -->
-      <dependency>
-        <groupId>com.fasterxml.jackson.core</groupId>
-        <artifactId>jackson-databind</artifactId>
-        <version>${jackson.version}</version>
-      </dependency>
     </dependencies>
   </dependencyManagement>
 
+  <dependencies>
+
+    <!-- ── Spring Boot ─────────────────────────────────────────────────── -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-thymeleaf</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <!-- ── Artemis embedded broker ─────────────────────────────────────── -->
+    <dependency>
+      <groupId>org.apache.activemq</groupId>
+      <artifactId>artemis-server</artifactId>
+      <version>${artemis.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.activemq</groupId>
+      <artifactId>artemis-core-client</artifactId>
+      <version>${artemis.version}</version>
+    </dependency>
+
+    <!-- ── Pulsar embedded broker (ZK + BookKeeper inclus) ─────────────── -->
+    <dependency>
+      <groupId>org.apache.pulsar</groupId>
+      <artifactId>pulsar-broker</artifactId>
+      <version>${pulsar.version}</version>
+    </dependency>
+
+    <!--
+      Jersey 2.42 référence plusieurs APIs Java EE 8 retirées du JDK Java 11+.
+      Spring Boot 3 fournit seulement les équivalents Jakarta EE 10 (jakarta.*).
+      On ajoute les EE8 correspondantes — elles coexistent sur le classpath.
+    -->
+    <dependency>
+      <groupId>javax.annotation</groupId>
+      <artifactId>javax.annotation-api</artifactId>
+      <version>1.3.2</version>
+    </dependency>
+    <!-- JAXB 2.3 (javax.xml.bind.*), EE8, retiré du JDK en Java 11 -->
+    <dependency>
+      <groupId>jakarta.xml.bind</groupId>
+      <artifactId>jakarta.xml.bind-api</artifactId>
+      <version>2.3.3</version>
+    </dependency>
+
+    <!-- ── Jackson ─────────────────────────────────────────────────────── -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+  </dependencies>
+
   <build>
-    <pluginManagement>
-      <plugins>
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-compiler-plugin</artifactId>
-          <version>3.13.0</version>
-          <configuration>
-            <release>${java.version}</release>
-          </configuration>
-        </plugin>
-        <plugin>
-          <groupId>org.springframework.boot</groupId>
-          <artifactId>spring-boot-maven-plugin</artifactId>
-          <version>${spring-boot.version}</version>
-          <configuration>
-            <!-- Désactivé par défaut sur tous les modules sauf runner -->
-            <skip>true</skip>
-          </configuration>
-        </plugin>
-      </plugins>
-    </pluginManagement>
+    <!--
+      runner/src/main/java  : application Spring Boot + services benchmark
+      broker-artemis et broker-pulsar : serveurs embarqués et clients
+    -->
+    <sourceDirectory>runner/src/main/java</sourceDirectory>
+    <resources>
+      <resource>
+        <directory>runner/src/main/resources</directory>
+      </resource>
+    </resources>
+
+    <plugins>
+
+      <!-- Ajoute les sources Artemis + Pulsar au même cycle de compilation -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <id>add-broker-sources</id>
+            <phase>generate-sources</phase>
+            <goals><goal>add-source</goal></goals>
+            <configuration>
+              <sources>
+                <source>broker-artemis/src/main/java</source>
+                <source>broker-pulsar/src/main/java</source>
+              </sources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+
+    </plugins>
   </build>
 
 </project>
