@@ -134,15 +134,14 @@ public class BenchmarkService {
             int run = r + 1;
             log.info("Multi-run {}/{}", run, N);
             if (p.artemis()) {
-                // Streaming intra-run avec partials (sauf parallel qui a sa propre progression)
                 artRuns[r] = p.producerCount() > 1
-                        ? benchmarkArtemis(payload, p.warmup(), p.messages())
+                        ? benchmarkArtemisPar(payload, p, run, N, cb)
                         : benchmarkArtemisWithProgress(payload, p, run, N, cb);
                 cb.accept(runSummaryEvt("artemis", run, N, artRuns[r]));
             }
             if (p.pulsar()) {
                 pulRuns[r] = p.producerCount() > 1
-                        ? benchmarkPulsar(payload, p.warmup(), p.messages())
+                        ? benchmarkPulsarPar(payload, p, run, N, cb)
                         : benchmarkPulsarWithProgress(payload, p, run, N, cb);
                 cb.accept(runSummaryEvt("pulsar", run, N, pulRuns[r]));
             }
@@ -297,8 +296,17 @@ public class BenchmarkService {
     // ── Artemis — parallel producers (pub latency only) ───────────────────────
 
     private void streamArtemisPar(byte[] payload, BenchmarkParams p, Consumer<BenchmarkProgress> cb) throws Exception {
+        BenchmarkResult.BrokerMetrics m = benchmarkArtemisPar(payload, p, 1, 1, cb);
+        cb.accept(new BenchmarkProgress("artemis", true,
+                m.messagesSent(), m.messagesSent(),
+                m.p50Ms(), m.p99Ms(), m.p999Ms(), m.throughputMsgSec(),
+                0, 0, 0, 1, 1, 0, 0, true));
+    }
+
+    private BenchmarkResult.BrokerMetrics benchmarkArtemisPar(byte[] payload, BenchmarkParams p,
+            int run, int totalRuns, Consumer<BenchmarkProgress> cb) throws Exception {
         int threads = p.producerCount(), perThread = p.messages() / threads, actual = perThread * threads;
-        log.info("Artemis par: {} × {} = {} msgs", threads, perThread, actual);
+        log.info("Artemis par: {} × {} = {} msgs (run {}/{})", threads, perThread, actual, run, totalRuns);
 
         try (ArtemisBenchmarkClient wc = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) {
             warmupArtemis(wc, payload, p.warmup());
@@ -320,7 +328,7 @@ public class BenchmarkService {
             });
         }
         while (!done.await(300, TimeUnit.MILLISECONDS))
-            cb.accept(parProgress("artemis", sent.get(), actual, System.nanoTime() - t0, 1, 1));
+            cb.accept(parProgress("artemis", sent.get(), actual, System.nanoTime() - t0, run, totalRuns));
         pool.shutdown();
         if (err.get() != null) throw err.get();
 
@@ -328,7 +336,7 @@ public class BenchmarkService {
         try (ArtemisBenchmarkClient dc = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) { dc.drain(actual, 60_000); }
 
         long[] all = merge(tlat, threads, perThread);
-        cb.accept(finalEvt("artemis", actual, all, EMPTY, elapsed, 1, 1));
+        return toMetrics(actual, all, EMPTY, elapsed);
     }
 
     // ── Pulsar — single producer, consumer concurrent ─────────────────────────
@@ -430,8 +438,17 @@ public class BenchmarkService {
     // ── Pulsar — parallel producers (pub latency only) ────────────────────────
 
     private void streamPulsarPar(byte[] payload, BenchmarkParams p, Consumer<BenchmarkProgress> cb) throws Exception {
+        BenchmarkResult.BrokerMetrics m = benchmarkPulsarPar(payload, p, 1, 1, cb);
+        cb.accept(new BenchmarkProgress("pulsar", true,
+                m.messagesSent(), m.messagesSent(),
+                m.p50Ms(), m.p99Ms(), m.p999Ms(), m.throughputMsgSec(),
+                0, 0, 0, 1, 1, 0, 0, true));
+    }
+
+    private BenchmarkResult.BrokerMetrics benchmarkPulsarPar(byte[] payload, BenchmarkParams p,
+            int run, int totalRuns, Consumer<BenchmarkProgress> cb) throws Exception {
         int threads = p.producerCount(), perThread = p.messages() / threads, actual = perThread * threads;
-        log.info("Pulsar par: {} × {} = {} msgs", threads, perThread, actual);
+        log.info("Pulsar par: {} × {} = {} msgs (run {}/{})", threads, perThread, actual, run, totalRuns);
 
         try (PulsarBenchmarkClient wc = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) {
             warmupPulsar(wc, payload, p.warmup());
@@ -453,7 +470,7 @@ public class BenchmarkService {
             });
         }
         while (!done.await(300, TimeUnit.MILLISECONDS))
-            cb.accept(parProgress("pulsar", sent.get(), actual, System.nanoTime() - t0, 1, 1));
+            cb.accept(parProgress("pulsar", sent.get(), actual, System.nanoTime() - t0, run, totalRuns));
         pool.shutdown();
         if (err.get() != null) throw err.get();
 
@@ -461,7 +478,7 @@ public class BenchmarkService {
         try (PulsarBenchmarkClient dc = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) { dc.drain(actual, 60_000); }
 
         long[] all = merge(tlat, threads, perThread);
-        cb.accept(finalEvt("pulsar", actual, all, EMPTY, elapsed, 1, 1));
+        return toMetrics(actual, all, EMPTY, elapsed);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -539,15 +556,21 @@ public class BenchmarkService {
 
     private static BenchmarkResult.BrokerMetrics toMetrics(int n, long[] pub, long[] e2e, long elapsedNs) {
         long[] sp = pub.clone(); Arrays.sort(sp);
-        long[] se = e2e.clone(); Arrays.sort(se);
+        // e2e peut être EMPTY (mode parallèle, pub-only) → E2E = 0
+        boolean hasE2e = e2e.length == n && n > 0;
+        double e50 = 0, e99 = 0, e999 = 0;
+        if (hasE2e) {
+            long[] se = e2e.clone(); Arrays.sort(se);
+            e50  = toMs(se[clamp(n, 0.50)]);
+            e99  = toMs(se[clamp(n, 0.99)]);
+            e999 = toMs(se[clamp(n, 0.999)]);
+        }
         return new BenchmarkResult.BrokerMetrics(n,
                 toMs(sp[clamp(n, 0.50)]),
                 toMs(sp[clamp(n, 0.99)]),
                 toMs(sp[clamp(n, 0.999)]),
                 n / (elapsedNs / 1e9),
-                toMs(se[clamp(n, 0.50)]),
-                toMs(se[clamp(n, 0.99)]),
-                toMs(se[clamp(n, 0.999)]));
+                e50, e99, e999);
     }
 
     private static long[] merge(long[][] t, int threads, int perThread) {
