@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -33,6 +34,9 @@ public class BenchmarkService {
     private final EmbeddedPulsarServer  pulsarServer;
     private final ObjectMapper mapper;
 
+    // Mutex : un seul benchmark (streaming ou sweep) à la fois
+    private final AtomicBoolean benchmarkRunning = new AtomicBoolean(false);
+
     public BenchmarkService(EmbeddedArtemisServer artemisServer, EmbeddedPulsarServer pulsarServer) {
         this.artemisServer = artemisServer;
         this.pulsarServer  = pulsarServer;
@@ -40,6 +44,8 @@ public class BenchmarkService {
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
                 .findAndRegisterModules();
     }
+
+    public boolean isRunning() { return benchmarkRunning.get(); }
 
     // ── Health check ──────────────────────────────────────────────────────────
 
@@ -86,15 +92,21 @@ public class BenchmarkService {
     // ── Streaming entry point ─────────────────────────────────────────────────
 
     public void runStreaming(BenchmarkParams params, Consumer<BenchmarkProgress> cb) throws Exception {
-        byte[] payload = buildPayload(params.payloadSize());
-        log.info("Stream — payload={}B warmup={} messages={} producers={} runs={} artemis={} pulsar={}",
-                payload.length, params.warmup(), params.messages(),
-                params.producerCount(), params.runs(), params.artemis(), params.pulsar());
+        if (!benchmarkRunning.compareAndSet(false, true))
+            throw new IllegalStateException("Un benchmark est déjà en cours — réessayez dans quelques instants.");
+        try {
+            byte[] payload = buildPayload(params.payloadSize());
+            log.info("Stream — payload={}B warmup={} messages={} producers={} runs={} artemis={} pulsar={}",
+                    payload.length, params.warmup(), params.messages(),
+                    params.producerCount(), params.runs(), params.artemis(), params.pulsar());
 
-        if (params.runs() > 1) {
-            runStreamingMulti(payload, params, cb);
-        } else {
-            runStreamingSingle(payload, params, cb);
+            if (params.runs() > 1) {
+                runStreamingMulti(payload, params, cb);
+            } else {
+                runStreamingSingle(payload, params, cb);
+            }
+        } finally {
+            benchmarkRunning.set(false);
         }
     }
 
@@ -161,40 +173,75 @@ public class BenchmarkService {
                 runs, runs, stdP99, stdE99);
     }
 
-    // ── Sweep — p99 vs taille payload ────────────────────────────────────────
+    // ── Sweep — p99 et débit vs taille payload ────────────────────────────────
 
     public void sweepStreaming(BenchmarkParams params, Consumer<SweepProgress> cb) throws Exception {
-        log.info("Sweep — warmup={} messages={} artemis={} pulsar={}",
-                params.warmup(), params.messages(), params.artemis(), params.pulsar());
+        if (!benchmarkRunning.compareAndSet(false, true))
+            throw new IllegalStateException("Un benchmark est déjà en cours — réessayez dans quelques instants.");
+        try {
+            log.info("Sweep — warmup={} messages={} artemis={} pulsar={}",
+                    params.warmup(), params.messages(), params.artemis(), params.pulsar());
 
-        List<SweepPoint> points = new ArrayList<>();
+            Random rng = new Random();
+            List<SweepPoint> points = new ArrayList<>();
 
-        for (int si = 0; si < SWEEP_SIZES.length; si++) {
-            int size = SWEEP_SIZES[si];
-            String label = SWEEP_LABELS[si];
-            byte[] payload = new byte[size];
-            new Random().nextBytes(payload);
+            for (int si = 0; si < SWEEP_SIZES.length; si++) {
+                int size = SWEEP_SIZES[si];
+                String label = SWEEP_LABELS[si];
+                byte[] payload = new byte[size];
+                rng.nextBytes(payload);
 
-            cb.accept(new SweepProgress("MEASURING", si, SWEEP_SIZES.length, size, label, 0, 0, List.copyOf(points)));
+                cb.accept(new SweepProgress("MEASURING", si, SWEEP_SIZES.length, size, label,
+                        0, 0, 0, 0, List.copyOf(points)));
 
-            double artP99 = 0, pulP99 = 0;
-            if (params.artemis()) artP99 = benchmarkArtemis(payload, params.warmup(), params.messages()).p99Ms();
-            if (params.pulsar())  pulP99 = benchmarkPulsar(payload,  params.warmup(), params.messages()).p99Ms();
+                BenchmarkResult.BrokerMetrics artResult = null, pulResult = null;
+                if (params.artemis()) artResult = benchmarkArtemis(payload, params.warmup(), params.messages());
+                if (params.pulsar())  pulResult = benchmarkPulsar(payload,  params.warmup(), params.messages());
 
-            points.add(new SweepPoint(size, label, artP99, pulP99));
-            cb.accept(new SweepProgress("POINT", si, SWEEP_SIZES.length, size, label, artP99, pulP99, List.copyOf(points)));
+                double artP99   = artResult != null ? artResult.p99Ms() : 0;
+                double pulP99   = pulResult != null ? pulResult.p99Ms() : 0;
+                double artMbSec = artResult != null ? artResult.throughputMsgSec() * size / (1024.0 * 1024.0) : 0;
+                double pulMbSec = pulResult != null ? pulResult.throughputMsgSec() * size / (1024.0 * 1024.0) : 0;
+
+                points.add(new SweepPoint(size, label, artP99, pulP99, artMbSec, pulMbSec));
+                cb.accept(new SweepProgress("POINT", si, SWEEP_SIZES.length, size, label,
+                        artP99, pulP99, artMbSec, pulMbSec, List.copyOf(points)));
+            }
+
+            cb.accept(new SweepProgress("DONE", SWEEP_SIZES.length - 1, SWEEP_SIZES.length, 0, "",
+                    0, 0, 0, 0, List.copyOf(points)));
+        } finally {
+            benchmarkRunning.set(false);
         }
-
-        cb.accept(new SweepProgress("DONE", SWEEP_SIZES.length - 1, SWEEP_SIZES.length, 0, "", 0, 0, List.copyOf(points)));
     }
 
-    // ── Artemis — single producer, E2E mesuré ─────────────────────────────────
+    // ── Artemis — single producer, consumer concurrent ────────────────────────
+    //
+    // Même architecture que Pulsar : le consumer tourne sur un thread daemon
+    // pendant que le producteur envoie tous les messages sans attendre.
+    // Artemis garantit l'ordre FIFO sur une queue single-producer, donc
+    // recvNs[i] correspond à sendNs[i] par position (pas besoin de seqno dans le message).
 
     private BenchmarkResult.BrokerMetrics benchmarkArtemis(byte[] payload, int warmup, int messages) throws Exception {
         try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) {
             warmupArtemis(c, payload, warmup);
-            long[][] lats = measureArtemis(c, payload, messages);
-            return toMetrics(messages, lats[0], lats[1], wallTime(lats[0]));
+            int n = messages;
+            long[] pub    = new long[n];
+            long[] sendNs = new long[n];
+
+            Future<long[]> recvFuture = c.consumeAsync(n);
+
+            long t0 = System.nanoTime();
+            for (int i = 0; i < n; i++) {
+                long[] sr = c.sendAndRecord(payload);
+                sendNs[i] = sr[0];
+                pub[i]    = sr[1];
+            }
+            long sendElapsed = System.nanoTime() - t0;
+
+            long[] recvNs = recvFuture.get(60, TimeUnit.SECONDS);
+            long[] e2e    = computeE2e(pub, sendNs, recvNs, n);
+            return toMetrics(n, pub, e2e, sendElapsed);
         }
     }
 
@@ -202,30 +249,30 @@ public class BenchmarkService {
         int n = p.messages();
         try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) {
             warmupArtemis(c, payload, p.warmup());
-            long[] pub = new long[n], e2e = new long[n];
+            long[] pub    = new long[n];
+            long[] sendNs = new long[n];
+
+            Future<long[]> recvFuture = c.consumeAsync(n);
+
             long t0 = System.nanoTime();
             for (int i = 0; i < n; i++) {
-                long[] both = c.sendAndMeasureBoth(payload);
-                pub[i] = both[0]; e2e[i] = both[1];
+                long[] sr = c.sendAndRecord(payload);
+                sendNs[i] = sr[0];
+                pub[i]    = sr[1];
                 if ((i + 1) % REPORT_INTERVAL == 0)
-                    cb.accept(partial("artemis", i + 1, n, pub, e2e, System.nanoTime() - t0, 1, 1));
+                    cb.accept(partial("artemis", i + 1, n, pub, new long[0], System.nanoTime() - t0, 1, 1));
             }
-            cb.accept(finalEvt("artemis", n, pub, e2e, System.nanoTime() - t0, 1, 1));
+            long sendElapsed = System.nanoTime() - t0;
+
+            long[] recvNs = recvFuture.get(60, TimeUnit.SECONDS);
+            long[] e2e    = computeE2e(pub, sendNs, recvNs, n);
+            cb.accept(finalEvt("artemis", n, pub, e2e, sendElapsed, 1, 1));
         }
     }
 
     private static void warmupArtemis(ArtemisBenchmarkClient c, byte[] payload, int warmup) throws Exception {
         for (int i = 0; i < warmup; i++) c.sendAndMeasure(payload);
         c.drain(warmup, 10_000);
-    }
-
-    private static long[][] measureArtemis(ArtemisBenchmarkClient c, byte[] payload, int n) throws Exception {
-        long[] pub = new long[n], e2e = new long[n];
-        for (int i = 0; i < n; i++) {
-            long[] both = c.sendAndMeasureBoth(payload);
-            pub[i] = both[0]; e2e[i] = both[1];
-        }
-        return new long[][]{pub, e2e};
     }
 
     // ── Artemis — parallel producers (pub latency only) ───────────────────────
@@ -267,8 +314,6 @@ public class BenchmarkService {
 
     // ── Pulsar — single producer, consumer concurrent ─────────────────────────
     //
-    // On ne fait plus de stop-and-wait (send → attendre consumer → send suivant),
-    // qui plafonnait le débit à 1000 / e2eMs ≈ 65 msg/s.
     // Le consumer tourne sur un thread daemon pendant que le producteur envoie
     // tous les messages en séquence. L'e2e est calculé message par message via
     // les timestamps sendNs[i] et recvNs[i] corrélés par le seqno (= la key).
@@ -326,11 +371,26 @@ public class BenchmarkService {
         c.drain(warmup, 10_000);
     }
 
-    /** e2e[i] = max(recvNs[i] - sendNs[i], pub[i]) ; fallback sur pub si recvNs manquant. */
+    /**
+     * Calcule la latence E2E par message.
+     * Pour Pulsar : corrélation par seqno (recvNs[i] = reception du message i).
+     * Pour Artemis : corrélation par position FIFO (recvNs[i] = reception du i-ème message en ordre).
+     * Si recvNs[i] == 0 (message non reçu dans le timeout), on utilise pub[i] comme fallback.
+     */
     private static long[] computeE2e(long[] pub, long[] sendNs, long[] recvNs, int n) {
         long[] e2e = new long[n];
         for (int i = 0; i < n; i++) {
-            e2e[i] = recvNs[i] > 0 ? Math.max(recvNs[i] - sendNs[i], pub[i]) : pub[i];
+            if (recvNs[i] > 0) {
+                long raw = recvNs[i] - sendNs[i];
+                if (raw < pub[i]) {
+                    log.warn("E2E[{}] < pubLat ({} < {} ns) — incohérence timestamp, fallback sur pubLat", i, raw, pub[i]);
+                    e2e[i] = pub[i];
+                } else {
+                    e2e[i] = raw;
+                }
+            } else {
+                e2e[i] = pub[i]; // message non reçu dans le timeout
+            }
         }
         return e2e;
     }
@@ -436,11 +496,17 @@ public class BenchmarkService {
         return all;
     }
 
-    private static long wallTime(long[] lat) {
-        long sum = 0; for (long l : lat) sum += l; return sum;
+    /**
+     * Formule correcte : le p-ème percentile est la plus petite valeur telle que
+     * p% des données sont inférieures ou égales à elle.
+     * Index = ceil(n * pct) - 1, clampé à [0, n-1].
+     * Corrige le bug précédent où (int)(n * pct) sur-estimait systématiquement d'un rang,
+     * et où p99.9 était confondu avec le max pour n < 10 000.
+     */
+    private static int clamp(int n, double pct) {
+        return Math.min(n - 1, Math.max(0, (int) Math.ceil(n * pct) - 1));
     }
 
-    private static int clamp(int n, double pct) { return Math.min(n - 1, (int)(n * pct)); }
     private static double toMs(long nanos) { return nanos / 1_000_000.0; }
 
     private byte[] buildPayload(int size) throws Exception {
@@ -466,9 +532,11 @@ public class BenchmarkService {
         return sum / ms.length;
     }
 
+    /** Stddev avec correction de Bessel (diviseur N-1) pour estimation non biaisée. */
     private static double stddev(BenchmarkResult.BrokerMetrics[] ms, MetricExtractor f, double mean) {
+        if (ms.length < 2) return 0;
         double sum = 0;
         for (BenchmarkResult.BrokerMetrics m : ms) sum += Math.pow(f.get(m) - mean, 2);
-        return Math.sqrt(sum / ms.length);
+        return Math.sqrt(sum / (ms.length - 1));
     }
 }

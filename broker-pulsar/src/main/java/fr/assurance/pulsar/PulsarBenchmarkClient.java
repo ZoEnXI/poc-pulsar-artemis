@@ -77,11 +77,12 @@ public class PulsarBenchmarkClient implements AutoCloseable {
                 while (received < n) {
                     Message<byte[]> m = consumer.receive(60, TimeUnit.SECONDS);
                     if (m == null) break;
+                    long recvTime = System.nanoTime(); // capture AVANT acknowledge
                     consumer.acknowledge(m);
                     try {
                         int seq = Integer.parseInt(m.getKey());
                         if (seq >= 0 && seq < n) {
-                            recvNs[seq] = System.nanoTime();
+                            recvNs[seq] = recvTime;
                             received++;
                         }
                     } catch (NumberFormatException ignored) { }
@@ -125,8 +126,10 @@ public class PulsarBenchmarkClient implements AutoCloseable {
 
     @Override
     public void close() throws PulsarClientException {
-        producer.close();
-        if (consumer != null) consumer.close();
-        client.close();
+        try { producer.close(); } finally {
+            try { if (consumer != null) consumer.close(); } finally {
+                client.close();
+            }
+        }
     }
 }

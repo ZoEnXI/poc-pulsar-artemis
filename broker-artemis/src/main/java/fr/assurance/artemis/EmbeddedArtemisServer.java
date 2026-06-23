@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 
 public class EmbeddedArtemisServer implements AutoCloseable {
 
@@ -17,21 +18,22 @@ public class EmbeddedArtemisServer implements AutoCloseable {
 
     private EmbeddedActiveMQ server;
     private int port;
+    private Path journalDir;
 
     public void start() throws Exception {
         port = freePort();
 
         // Journal dans un tmpdir : persistance sur disque sans fsync forcé
         // → iso-durable avec Pulsar/BookKeeper standalone (qui n'impose pas non plus le fsync par défaut)
-        Path journalDir = Files.createTempDirectory("artemis-journal-");
+        journalDir = Files.createTempDirectory("artemis-journal-");
 
         Configuration config = new ConfigurationImpl()
                 .setPersistenceEnabled(true)
                 .setJournalDirectory(journalDir.toString())
                 .setBindingsDirectory(journalDir.resolve("bindings").toString())
                 .setLargeMessagesDirectory(journalDir.resolve("large").toString())
-                .setJournalSyncNonTransactional(false)   // pas de fsync sur les writes non-tx
-                .setJournalSyncTransactional(false)       // idem tx (cohérent avec BK standalone)
+                .setJournalSyncNonTransactional(false)
+                .setJournalSyncTransactional(false)
                 .setSecurityEnabled(false)
                 .addAcceptorConfiguration("core", "tcp://localhost:" + port + "?protocols=CORE");
 
@@ -45,14 +47,29 @@ public class EmbeddedArtemisServer implements AutoCloseable {
 
     public String getBrokerUrl() { return "tcp://localhost:" + port; }
 
-    /** true = journal activé sur tmpdir (mode courant) */
     public boolean isPersistent() { return true; }
 
     @Override
     public void close() throws Exception {
-        if (server != null) {
-            server.stop();
-            log.info("Artemis embedded stopped");
+        try {
+            if (server != null) {
+                server.stop();
+                log.info("Artemis embedded stopped");
+            }
+        } finally {
+            deleteJournalDir();
+        }
+    }
+
+    private void deleteJournalDir() {
+        if (journalDir == null) return;
+        try {
+            Files.walk(journalDir)
+                 .sorted(Comparator.reverseOrder())
+                 .forEach(p -> { try { Files.delete(p); } catch (IOException ignored) {} });
+            log.debug("Journal tmpdir deleted: {}", journalDir);
+        } catch (IOException e) {
+            log.warn("Could not delete journal tmpdir {}: {}", journalDir, e.getMessage());
         }
     }
 

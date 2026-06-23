@@ -1,6 +1,7 @@
 package fr.assurance.runner;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,9 +28,17 @@ public class BenchmarkController {
         return t;
     };
 
+    // Pool partagé (single-thread) : le mutex dans BenchmarkService empêche les doublons.
+    private final ExecutorService executor = Executors.newSingleThreadExecutor(DAEMON_FACTORY);
+
     public BenchmarkController(BenchmarkService service, ObjectMapper mapper) {
         this.service = service;
         this.mapper  = mapper;
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        executor.shutdown();
     }
 
     @GetMapping("/")
@@ -67,12 +77,15 @@ public class BenchmarkController {
                 Math.max(1, producerCount), Math.max(1, Math.min(runs, 5)));
         SseEmitter emitter = new SseEmitter(600_000L);
 
-        Executors.newSingleThreadExecutor(DAEMON_FACTORY).submit(() -> {
+        executor.submit(() -> {
             try {
                 service.runStreaming(params, progress -> {
                     try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(progress))); }
                     catch (Exception e) { emitter.completeWithError(e); }
                 });
+                emitter.complete();
+            } catch (IllegalStateException e) {
+                try { emitter.send(SseEmitter.event().name("error").data(e.getMessage())); } catch (Exception ignored) {}
                 emitter.complete();
             } catch (Exception e) { emitter.completeWithError(e); }
         });
@@ -91,12 +104,15 @@ public class BenchmarkController {
         BenchmarkParams params = new BenchmarkParams(warmup, messages, 0, artemis, pulsar, 1, 1);
         SseEmitter emitter = new SseEmitter(600_000L);
 
-        Executors.newSingleThreadExecutor(DAEMON_FACTORY).submit(() -> {
+        executor.submit(() -> {
             try {
                 service.sweepStreaming(params, point -> {
                     try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(point))); }
                     catch (Exception e) { emitter.completeWithError(e); }
                 });
+                emitter.complete();
+            } catch (IllegalStateException e) {
+                try { emitter.send(SseEmitter.event().name("error").data(e.getMessage())); } catch (Exception ignored) {}
                 emitter.complete();
             } catch (Exception e) { emitter.completeWithError(e); }
         });

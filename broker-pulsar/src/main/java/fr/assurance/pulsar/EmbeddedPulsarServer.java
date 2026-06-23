@@ -83,11 +83,11 @@ public class EmbeddedPulsarServer implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        if (pulsarService != null) {
-            pulsarService.close();
-        }
-        if (bkEnsemble != null) {
-            bkEnsemble.stop();
+        try {
+            if (pulsarService != null) pulsarService.close();
+        } finally {
+            // BookKeeper/ZooKeeper doivent être stoppés même si pulsarService.close() lève
+            if (bkEnsemble != null) bkEnsemble.stop();
         }
         log.info("Pulsar embedded stopped");
     }

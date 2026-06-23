@@ -8,69 +8,73 @@
 ## Sprint 1 — Validité scientifique des mesures *(BLOQUANT — aucune conclusion défendable avant ce sprint)*
 
 ### 1.1 Unifier l'architecture de mesure Artemis/Pulsar
-- [ ] Réécrire `ArtemisBenchmarkClient` en mode concurrent (producer libre + consumer parallèle)
-- [ ] Supprimer le modèle stop-and-wait d'Artemis
-- [ ] `t0` pris après création du message, juste avant l'appel réseau (hors sérialisation)
+- [x] Réécrire `ArtemisBenchmarkClient` en mode concurrent : `sendAndRecord()` + `consumeAsync()` (FIFO position-based)
+- [x] Supprimer le modèle stop-and-wait d'Artemis (`measureArtemis`, `sendAndMeasureBoth` en benchmark)
+- [x] `t0` pris après `writeBytes()`, juste avant `producer.send()` (sérialisation exclue de la mesure)
 
 ### 1.2 Corriger le calcul du débit
-- [ ] Remplacer `wallTime(lats[0])` par `System.nanoTime()` encadrant la boucle complète pour Artemis
-- [ ] Unifier `benchmarkArtemis` et `streamArtemis` sur la même formule
+- [x] Remplacer `wallTime(lats[0])` par `System.nanoTime()` encadrant la boucle complète pour Artemis
+- [x] Unifier `benchmarkArtemis` et `streamArtemis` sur la même formule (`sendElapsed`)
+- [x] Supprimer la méthode `wallTime` devenue inutile
 
 ### 1.3 Corriger les percentiles (p99/p99.9 surestimés)
-- [ ] Formule : `Math.min(n - 1, (int) Math.ceil(n * pct) - 1)`
-- [ ] Vérifier que p99.9 est discriminant à partir de n = 1 000
+- [x] Formule : `Math.min(n - 1, Math.max(0, (int) Math.ceil(n * pct) - 1))`
+- [x] p99.9 est maintenant discriminant à partir de n = 1 000 (index 998/1000 au lieu du max)
 
 ### 1.4 Corriger la StdDev inter-runs (diviseur N au lieu de N-1)
-- [ ] `Math.sqrt(sum / (ms.length - 1))` avec guard `ms.length < 2 → 0`
+- [x] `Math.sqrt(sum / (ms.length - 1))` avec guard `ms.length < 2 → 0` (correction de Bessel)
 
 ### 1.5 Corriger la mesure E2E
-- [ ] `recvNs[seq]` pris **avant** `acknowledge()` dans `consumeAsync` Pulsar (aligner sur Artemis)
-- [ ] Supprimer `Math.max(recvNs[i] - sendNs[i], pub[i])` ; logguer en WARN si incohérence
+- [x] `recvNs[seq]` pris **avant** `acknowledge()` dans `consumeAsync` Pulsar
+- [x] Supprimer `Math.max(recvNs[i] - sendNs[i], pub[i])` dans `computeE2e` ; log WARN si incohérence
 
 ### 1.6 Ajouter MB/s dans le sweep
-- [ ] Calculer `throughputMbSec` dans `SweepPoint`
-- [ ] Exposer dans l'API SSE et afficher dans le graphe Chart.js (second axe Y ou dataset dédié)
+- [x] `artemisThroughputMbSec` / `pulsarThroughputMbSec` ajoutés à `SweepPoint` et `SweepProgress`
+- [x] Calculé comme `throughputMsgSec * payloadBytes / (1024² )` dans `BenchmarkService.sweepStreaming`
+- [ ] Afficher dans le graphe Chart.js (second axe Y) — **différé Sprint 3**
 
-**Commits :** à venir  
-**Statut : 🔄 EN COURS**
+**Commits :** `fix(bench): sprint1 — mesures iso Artemis/Pulsar, percentiles, stddev, MB/s sweep`  
+**Statut : ✅ TERMINÉ**
 
 ---
 
 ## Sprint 2 — Infrastructure robuste *(prérequis pour des runs reproductibles)*
 
 ### 2.1 Mutex anti-concurrence sur les benchmarks
-- [ ] `AtomicBoolean running` dans `BenchmarkService` → HTTP 409 si run actif
-- [ ] Même guard dans `PulsarFeaturesService`
+- [x] `AtomicBoolean benchmarkRunning` dans `BenchmarkService` → `IllegalStateException` si run actif
+- [x] `AtomicBoolean featureRunning` dans `PulsarFeaturesService` → idem pour toutes les démos
 
 ### 2.2 Corriger les fuites de thread pools
-- [ ] `BenchmarkController` : un seul `ExecutorService` singleton + `@PreDestroy shutdown()`
-- [ ] `PulsarFeaturesController` : idem, threads nommés via `ThreadFactory`
+- [x] `BenchmarkController` : `ExecutorService` singleton partagé + `@PreDestroy shutdown()`
+- [x] `PulsarFeaturesController` : idem, threads nommés `pulsar-feature-N` daemon via `ThreadFactory`
+- [x] Erreur mutex propagée comme event SSE `name("error")` au client (pas de 409 silencieux)
 
 ### 2.3 Isolation des topics Pulsar
-- [ ] Suffixe `UUID.randomUUID()` au lieu de `currentTimeMillis()` dans les démos
+- [x] Suffixe `UUID.randomUUID()` (12 chars hex) au lieu de `currentTimeMillis()` dans toutes les démos
+- [x] `DLT` : UID partagé entre topic principal et topic DLT pour cohérence
 
 ### 2.4 Corriger le shutdown de `EmbeddedPulsarServer`
-- [ ] Triple `try-finally` : `pulsarService.close()` → `bkEnsemble.stop()` (toujours exécuté)
+- [x] `try { pulsarService.close() } finally { bkEnsemble.stop() }` — BookKeeper/ZK toujours stoppés
 
 ### 2.5 Corriger les `close()` des clients (fuite si 1ère close() lève)
-- [ ] `ArtemisBenchmarkClient.close()` : try-finally chaîné
-- [ ] `PulsarBenchmarkClient.close()` : idem
+- [x] `ArtemisBenchmarkClient.close()` : chaîne `try-finally` (producer → producerSession → consumer → consumerSession → factory → locator)
+- [x] `PulsarBenchmarkClient.close()` : `try-finally` (producer → consumer → client)
 
 ### 2.6 Nettoyage du journal Artemis (fuite tmpdir)
-- [ ] `EmbeddedArtemisServer.close()` : `Files.walk(journalDir)` + delete récursif
+- [x] `journalDir` conservé comme champ de `EmbeddedArtemisServer`
+- [x] `close()` : `Files.walk(journalDir).sorted(reverseOrder()).forEach(Files::delete)` après `server.stop()`
 
 ### 2.7 Corriger le TOCTOU des ports
-- [ ] Artemis : conserver le `ServerSocket` ouvert jusqu'au `addAcceptorConfiguration`
-- [ ] Pulsar : idem pour les 3 ports ZK/BK/broker
+- [ ] **Déféré** : risque faible en POC single-developer ; un retry au démarrage suffirait mais complexifie inutilement le code
 
 ### 2.8 Corriger la démo Replay (seek sur messages acquittés)
-- [ ] Utiliser l'API `Reader` Pulsar au lieu de `seek(earliest)` sur consumer avec messages acquittés
+- [x] Remplacer `consumer.seek(MessageId.earliest)` par l'API `Reader` (lit directement depuis le ledger, indépendant de la rétention basée sur ACK)
 
 ### 2.9 Corriger la NPE Key_Shared (`Map.copyOf` + key null)
-- [ ] Guard `if (key != null)` avant `assignments.put(key, cid)`
+- [x] Guard `if (key == null) { acknowledge; continue; }` dans la boucle consumer Key_Shared
 
-**Commits :** à venir  
-**Statut : 🔄 EN COURS**
+**Commits :** `fix(infra): sprint2 — mutex, thread pools, shutdown, UUID topics, Replay Reader, NPE`  
+**Statut : ✅ TERMINÉ**
 
 ---
 
@@ -94,15 +98,17 @@
 ### 3.5 Corriger les `TypeError` en sweep (`.toFixed()` sur `undefined`)
 - [ ] Guard `v != null ? (+v).toFixed(3) : null` avant chaque accès
 - [ ] Passer `null` aux datasets Chart.js pour les points manquants
+- [ ] Afficher MB/s dans le graphe sweep (second axe Y) — reporté de Sprint 1.6
 
 ### 3.6 Corriger le tooltip Chart.js (crash sur valeur `null`)
-- [ ] `label: c => c.parsed.y != null ? \`${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms\` : 'N/A'`
+- [ ] `` label: c => c.parsed.y != null ? `${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms` : 'N/A' ``
 
 ### 3.7 Corriger le badge d'égalité (▲ attribué à Pulsar si égaux)
 - [ ] `pWins = both && (m.lower ? m.kp < m.ka : m.kp > m.ka)` (false si égalité stricte)
 
 ### 3.8 Corriger le faux "Erreur SSE" à la fermeture normale
 - [ ] Flag `let streamDone = false` → `true` sur dernier event ; `onerror` ne signale que si `!streamDone`
+- [ ] Gérer l'event `name("error")` envoyé par le serveur en cas de mutex (message "déjà en cours")
 
 **Commits :** à venir  
 **Statut : ⬜ EN ATTENTE**
@@ -137,8 +143,8 @@
 
 | Sprint | Thème | Statut |
 |--------|-------|--------|
-| Sprint 1 | Validité des mesures | 🔄 EN COURS |
-| Sprint 2 | Infrastructure robuste | 🔄 EN COURS |
+| Sprint 1 | Validité des mesures | ✅ TERMINÉ |
+| Sprint 2 | Infrastructure robuste | ✅ TERMINÉ |
 | Sprint 3 | IHM honnête | ⬜ EN ATTENTE |
 | Sprint 4 | Qualité & enrichissement | ⬜ EN ATTENTE |
 

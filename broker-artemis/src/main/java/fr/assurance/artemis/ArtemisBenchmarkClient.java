@@ -6,7 +6,9 @@ import org.apache.activemq.artemis.api.core.client.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 public class ArtemisBenchmarkClient implements AutoCloseable {
@@ -60,14 +62,58 @@ public class ArtemisBenchmarkClient implements AutoCloseable {
     }
 
     /**
-     * Envoie un message et attend sa réception par le consumer.
-     * @return [pubLatencyNs, e2eLatencyNs]  (e2e >= pub)
+     * Envoie un message et retourne {sendNs, pubLatNs}.
+     * Utilisé pour les benchmarks concurrents : le consumer tourne en parallèle
+     * sur un thread séparé, sans bloquer le producteur entre chaque message.
+     * La sérialisation (writeBytes) est exclue de la mesure.
+     */
+    public long[] sendAndRecord(byte[] payload) throws ActiveMQException {
+        ClientMessage msg = producerSession.createMessage(true);
+        msg.getBodyBuffer().writeBytes(payload);
+        long t0 = System.nanoTime();
+        producer.send(msg);
+        return new long[]{t0, System.nanoTime() - t0};
+    }
+
+    /**
+     * Démarre un thread daemon qui consomme n messages en ordre FIFO.
+     * Artemis garantit l'ordre sur une queue single-producer, donc recvNs[i]
+     * correspond à sendNs[i] par position.
+     * @return Future complété avec un tableau recvNs[i] = nanoTime à la réception.
+     */
+    public Future<long[]> consumeAsync(int n) {
+        if (consumer == null) throw new IllegalStateException("consumeAsync() requires producerOnly=false");
+        CompletableFuture<long[]> future = new CompletableFuture<>();
+        Thread t = new Thread(() -> {
+            long[] recvNs = new long[n];
+            int received = 0;
+            try {
+                while (received < n) {
+                    ClientMessage msg = consumer.receive(60_000);
+                    if (msg == null) break;
+                    recvNs[received++] = System.nanoTime();
+                    msg.acknowledge();
+                }
+                future.complete(recvNs);
+            } catch (ActiveMQException e) {
+                future.completeExceptionally(e);
+            }
+        }, "artemis-recv-async");
+        t.setDaemon(true);
+        t.start();
+        return future;
+    }
+
+    /**
+     * Health check uniquement : envoie 1 message et attend sa réception (stop-and-wait).
+     * Ne pas utiliser pour les benchmarks — voir sendAndRecord + consumeAsync.
+     * @return [pubLatencyNs, e2eLatencyNs]
      */
     public long[] sendAndMeasureBoth(byte[] payload) throws ActiveMQException {
         if (consumer == null) throw new IllegalStateException("sendAndMeasureBoth() requires producerOnly=false");
         ClientMessage msg = producerSession.createMessage(true);
-        long sentAt = System.nanoTime();
         msg.getBodyBuffer().writeBytes(payload);
+        long sentAt = System.nanoTime();
         producer.send(msg);
         long pubLat = System.nanoTime() - sentAt;
 
@@ -96,11 +142,16 @@ public class ArtemisBenchmarkClient implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        producer.close();
-        producerSession.close();
-        if (consumer != null) consumer.close();
-        if (consumerSession != null) consumerSession.close();
-        factory.close();
-        locator.close();
+        try { producer.close(); } finally {
+            try { producerSession.close(); } finally {
+                try { if (consumer != null) consumer.close(); } finally {
+                    try { if (consumerSession != null) consumerSession.close(); } finally {
+                        try { factory.close(); } finally {
+                            locator.close();
+                        }
+                    }
+                }
+            }
+        }
     }
 }
