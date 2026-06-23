@@ -534,12 +534,12 @@
      ═══════════════════════════════════════════════════════════ -->
 <div id="tab-comparatif" class="tab-content" style="display:none">
   <div class="card">
-    <div class="card-header"><h2>Comparatif Artemis 2.36 vs Pulsar 3.3</h2></div>
+    <div class="card-header"><h2>Comparatif Artemis 2.36 vs Pulsar 4.2</h2></div>
     <table class="comp-table">
       <thead><tr>
         <th style="width:38%">Feature</th>
         <th class="col-a" style="width:31%">ActiveMQ Artemis 2.36</th>
-        <th class="col-p" style="width:31%">Apache Pulsar 3.3</th>
+        <th class="col-p" style="width:31%">Apache Pulsar 4.2</th>
       </tr></thead>
       <tbody>
         <tr class="comp-section"><td colspan="3">Résultats benchmark (dernier run — lancez l'onglet Benchmark)</td></tr>
@@ -596,7 +596,7 @@
             <td><span class="badge yes">✅ tenant / namespace / topic</span></td></tr>
         <tr><td class="feature-label">Transactions</td>
             <td><span class="badge yes">✅ JMS / AMQP</span></td>
-            <td><span class="badge yes">✅ API transactions 2.8+</span></td></tr>
+            <td><span class="badge yes">✅ API transactions (4.x)</span></td></tr>
         <tr><td class="feature-label">Géo-réplication</td>
             <td><span class="badge no">❌</span></td>
             <td><span class="badge yes">✅ natif</span></td></tr>
@@ -1266,7 +1266,7 @@
      ═══════════════════════════════════════════════════════════ */
   function syncComparatif() {
     const a = bState['artemis'], p = bState['pulsar'];
-    const set = (id, val) => { if (val > 0) document.getElementById(id).textContent = val; };
+    const set = (id, val) => { document.getElementById(id).textContent = val; };
     if (a?.done) {
       set('cmp-a-p50', a.p50Ms.toFixed(2) + ' ms');
       set('cmp-a-p99', a.p99Ms.toFixed(2) + ' ms');
@@ -1276,7 +1276,7 @@
     if (p?.done) {
       set('cmp-p-p50', p.p50Ms.toFixed(2) + ' ms');
       set('cmp-p-p99', p.p99Ms.toFixed(2) + ' ms');
-      set('cmp-p-e50', p.e2eP50Ms > 0 ? p.e2eP50Ms.toFixed(2) + ' ms' : '— (parallèle)');
+      set('cmp-p-e50', p.e2eP50Ms > 0 ? p.e2eP50Ms.toFixed(2) + ' ms' : '— (dispatch async)');
       set('cmp-p-tp',  Math.round(p.throughputMsgSec).toLocaleString('fr-FR') + ' msg/s');
     }
   }
