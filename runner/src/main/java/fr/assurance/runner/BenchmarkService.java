@@ -123,7 +123,7 @@ public class BenchmarkService {
         }
     }
 
-    // ── Multi-run — silent, émet un résumé par run + stddev finale ───────────
+    // ── Multi-run — streaming intra-run + résumé par run + stddev finale ────
 
     private void runStreamingMulti(byte[] payload, BenchmarkParams p, Consumer<BenchmarkProgress> cb) throws Exception {
         int N = p.runs();
@@ -134,11 +134,16 @@ public class BenchmarkService {
             int run = r + 1;
             log.info("Multi-run {}/{}", run, N);
             if (p.artemis()) {
-                artRuns[r] = benchmarkArtemis(payload, p.warmup(), p.messages());
+                // Streaming intra-run avec partials (sauf parallel qui a sa propre progression)
+                artRuns[r] = p.producerCount() > 1
+                        ? benchmarkArtemis(payload, p.warmup(), p.messages())
+                        : benchmarkArtemisWithProgress(payload, p, run, N, cb);
                 cb.accept(runSummaryEvt("artemis", run, N, artRuns[r]));
             }
             if (p.pulsar()) {
-                pulRuns[r] = benchmarkPulsar(payload, p.warmup(), p.messages());
+                pulRuns[r] = p.producerCount() > 1
+                        ? benchmarkPulsar(payload, p.warmup(), p.messages())
+                        : benchmarkPulsarWithProgress(payload, p, run, N, cb);
                 cb.accept(runSummaryEvt("pulsar", run, N, pulRuns[r]));
             }
         }
@@ -246,13 +251,26 @@ public class BenchmarkService {
     }
 
     private void streamArtemis(byte[] payload, BenchmarkParams p, Consumer<BenchmarkProgress> cb) throws Exception {
+        BenchmarkResult.BrokerMetrics m = benchmarkArtemisWithProgress(payload, p, 1, 1, cb);
+        // finalEvt recalculé depuis les métriques agrégées (single-run → isFinalRun=true)
+        cb.accept(new BenchmarkProgress("artemis", true,
+                m.messagesSent(), m.messagesSent(),
+                m.p50Ms(), m.p99Ms(), m.p999Ms(), m.throughputMsgSec(),
+                m.e2eP50Ms(), m.e2eP99Ms(), m.e2eP999Ms(),
+                1, 1, 0, 0, true));
+    }
+
+    /** Exécute le benchmark Artemis avec partials intra-run. Retourne les métriques sans émettre l'event final. */
+    private BenchmarkResult.BrokerMetrics benchmarkArtemisWithProgress(byte[] payload, BenchmarkParams p,
+            int run, int totalRuns, Consumer<BenchmarkProgress> cb) throws Exception {
         int n = p.messages();
         try (ArtemisBenchmarkClient c = new ArtemisBenchmarkClient(artemisServer.getBrokerUrl())) {
             warmupArtemis(c, payload, p.warmup());
             long[] pub    = new long[n];
             long[] sendNs = new long[n];
+            long[] recvNs = new long[n];
 
-            Future<long[]> recvFuture = c.consumeAsync(n);
+            Future<long[]> recvFuture = c.consumeAsync(n, recvNs);
 
             long t0 = System.nanoTime();
             for (int i = 0; i < n; i++) {
@@ -260,13 +278,14 @@ public class BenchmarkService {
                 sendNs[i] = sr[0];
                 pub[i]    = sr[1];
                 if ((i + 1) % REPORT_INTERVAL == 0)
-                    cb.accept(partial("artemis", i + 1, n, pub, new long[0], System.nanoTime() - t0, 1, 1));
+                    cb.accept(partial("artemis", i + 1, n, pub,
+                            partialE2e(pub, sendNs, recvNs, i + 1), System.nanoTime() - t0, run, totalRuns));
             }
             long sendElapsed = System.nanoTime() - t0;
 
-            long[] recvNs = recvFuture.get(60, TimeUnit.SECONDS);
-            long[] e2e    = computeE2e(pub, sendNs, recvNs, n);
-            cb.accept(finalEvt("artemis", n, pub, e2e, sendElapsed, 1, 1));
+            recvFuture.get(60, TimeUnit.SECONDS);
+            long[] e2e = computeE2e(pub, sendNs, recvNs, n);
+            return toMetrics(n, pub, e2e, sendElapsed);
         }
     }
 
@@ -342,13 +361,25 @@ public class BenchmarkService {
     }
 
     private void streamPulsar(byte[] payload, BenchmarkParams p, Consumer<BenchmarkProgress> cb) throws Exception {
+        BenchmarkResult.BrokerMetrics m = benchmarkPulsarWithProgress(payload, p, 1, 1, cb);
+        cb.accept(new BenchmarkProgress("pulsar", true,
+                m.messagesSent(), m.messagesSent(),
+                m.p50Ms(), m.p99Ms(), m.p999Ms(), m.throughputMsgSec(),
+                m.e2eP50Ms(), m.e2eP99Ms(), m.e2eP999Ms(),
+                1, 1, 0, 0, true));
+    }
+
+    /** Exécute le benchmark Pulsar avec partials intra-run. Retourne les métriques sans émettre l'event final. */
+    private BenchmarkResult.BrokerMetrics benchmarkPulsarWithProgress(byte[] payload, BenchmarkParams p,
+            int run, int totalRuns, Consumer<BenchmarkProgress> cb) throws Exception {
         int n = p.messages();
         try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(pulsarServer.getBrokerUrl())) {
             warmupPulsar(c, payload, p.warmup());
             long[] pub    = new long[n];
             long[] sendNs = new long[n];
+            long[] recvNs = new long[n];
 
-            Future<long[]> recvFuture = c.consumeAsync(n);
+            Future<long[]> recvFuture = c.consumeAsync(n, recvNs);
 
             long t0 = System.nanoTime();
             for (int i = 0; i < n; i++) {
@@ -356,13 +387,14 @@ public class BenchmarkService {
                 sendNs[i] = sr[0];
                 pub[i]    = sr[1];
                 if ((i + 1) % REPORT_INTERVAL == 0)
-                    cb.accept(partial("pulsar", i + 1, n, pub, new long[0], System.nanoTime() - t0, 1, 1));
+                    cb.accept(partial("pulsar", i + 1, n, pub,
+                            partialE2e(pub, sendNs, recvNs, i + 1), System.nanoTime() - t0, run, totalRuns));
             }
             long sendElapsed = System.nanoTime() - t0;
 
-            long[] recvNs = recvFuture.get(60, TimeUnit.SECONDS);
-            long[] e2e    = computeE2e(pub, sendNs, recvNs, n);
-            cb.accept(finalEvt("pulsar", n, pub, e2e, sendElapsed, 1, 1));
+            recvFuture.get(60, TimeUnit.SECONDS);
+            long[] e2e = computeE2e(pub, sendNs, recvNs, n);
+            return toMetrics(n, pub, e2e, sendElapsed);
         }
     }
 
@@ -440,16 +472,44 @@ public class BenchmarkService {
                                               long[] pub, long[] e2e, long elapsedNs,
                                               int run, int totalRuns) {
         long[] sp = Arrays.copyOf(pub, sent); Arrays.sort(sp);
-        long[] se = Arrays.copyOf(e2e, sent); Arrays.sort(se);
+        // e2e peut avoir length != sent (partialE2e retourne seulement les msgs reçus)
+        int eLen = e2e.length;
+        boolean hasE2e = eLen >= 2;
+        double e50 = 0, e99 = 0, e999 = 0;
+        if (hasE2e) {
+            long[] se = e2e.clone(); Arrays.sort(se);
+            e50  = toMs(se[clamp(eLen, 0.50)]);
+            e99  = toMs(se[clamp(eLen, 0.99)]);
+            e999 = toMs(se[clamp(eLen, 0.999)]);
+        }
         return new BenchmarkProgress(broker, false, sent, total,
                 toMs(sp[clamp(sent, 0.50)]),
                 toMs(sp[clamp(sent, 0.99)]),
                 toMs(sp[clamp(sent, 0.999)]),
                 sent / (elapsedNs / 1e9),
-                toMs(se[clamp(sent, 0.50)]),
-                toMs(se[clamp(sent, 0.99)]),
-                toMs(se[clamp(sent, 0.999)]),
+                e50, e99, e999,
                 run, totalRuns, 0, 0, false);
+    }
+
+    /**
+     * E2E partiel pour les events de progression intra-run.
+     * Collecte uniquement les messages déjà reçus (recvNs[i] > 0) parmi les i premiers envoyés.
+     * La race entre le thread consumer (écriture) et le thread producer (lecture) est intentionnelle :
+     * des valeurs stale sont acceptables pour des métriques de progression.
+     */
+    private static long[] partialE2e(long[] pub, long[] sendNs, long[] recvNs, int sent) {
+        int count = 0;
+        for (int i = 0; i < sent; i++) if (recvNs[i] > 0) count++;
+        if (count < 2) return EMPTY;
+        long[] e2e = new long[count];
+        int j = 0;
+        for (int i = 0; i < sent; i++) {
+            if (recvNs[i] > 0) {
+                long raw = recvNs[i] - sendNs[i];
+                e2e[j++] = raw >= pub[i] ? raw : pub[i];
+            }
+        }
+        return e2e;
     }
 
     private static BenchmarkProgress finalEvt(String broker, int n,

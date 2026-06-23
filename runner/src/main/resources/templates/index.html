@@ -624,6 +624,18 @@
         <tr><td class="feature-label">Courbe d'apprentissage</td>
             <td><span class="badge yes">✅ faible — JMS standard</span></td>
             <td><span class="badge partial">⚠ modèle propre à maîtriser</span></td></tr>
+
+        <tr class="comp-section"><td colspan="3">Conditions de durabilité (ce POC)</td></tr>
+        <tr>
+          <td class="feature-label">Stockage messages</td>
+          <td class="val-a" style="font-size:.78rem;color:#6b7280">Journal tmpdir · fsync désactivé<br><em style="color:#4b5563">résultats valables en throughput relatif uniquement</em></td>
+          <td class="val-p" style="font-size:.78rem;color:#6b7280">BookKeeper tmpdir · fsync désactivé<br><em style="color:#4b5563">résultats valables en throughput relatif uniquement</em></td>
+        </tr>
+        <tr>
+          <td class="feature-label">Durabilité prod.</td>
+          <td><span class="badge partial">⚠ journal durable (config)</span></td>
+          <td><span class="badge partial">⚠ Quorum BookKeeper (config)</span></td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -834,6 +846,11 @@
     const incA = document.getElementById('chk-artemis').checked;
     const incP = document.getElementById('chk-pulsar').checked;
     if (!incA && !incP) { errBox.textContent = 'Sélectionne au moins un broker.'; errBox.style.display = 'block'; return; }
+    const msgV = +messages, plV = +payloadSize, prodV = +producerCount, runsV = +runs;
+    if (msgV < 100 || msgV > 50000)   { errBox.textContent = 'Messages : 100–50 000.';       errBox.style.display = 'block'; return; }
+    if (plV  < 0   || plV  > 65536)   { errBox.textContent = 'Payload : 0–65 536 octets.';   errBox.style.display = 'block'; return; }
+    if (prodV < 1  || prodV > 8)      { errBox.textContent = 'Producteurs : 1–8.';            errBox.style.display = 'block'; return; }
+    if (runsV < 1  || runsV > 5)      { errBox.textContent = 'Répétitions : 1–5.';           errBox.style.display = 'block'; return; }
     const e2eNote = +producerCount === 1 ? ' · E2E activé' : ' · pub only (parallèle)';
     const pl = +payloadSize > 0 ? `${payloadSize} B` : 'ContratEvent JSON (~150 B)';
     const runsNote = runs > 1 ? ` · ${runs} runs` : '';

@@ -68,10 +68,19 @@ public class PulsarBenchmarkClient implements AutoCloseable {
      * @return Future complété avec un tableau recvNs[seqno] = nanoTime à la réception.
      */
     public Future<long[]> consumeAsync(int n) {
+        return consumeAsync(n, new long[n]);
+    }
+
+    /**
+     * Variante avec tableau externe pré-alloué par l'appelant.
+     * Permet des lectures partielles par le thread producteur (E2E progressif) :
+     * recvNs[seq] > 0 ⟺ message seq déjà reçu. Pas de garantie mémoire stricte
+     * entre threads, mais acceptable pour des métriques de progression (POC).
+     */
+    public Future<long[]> consumeAsync(int n, long[] recvNs) {
         if (consumer == null) throw new IllegalStateException("consumeAsync() requires producerOnly=false");
         CompletableFuture<long[]> future = new CompletableFuture<>();
         Thread t = new Thread(() -> {
-            long[] recvNs = new long[n];
             int received = 0;
             try {
                 while (received < n) {

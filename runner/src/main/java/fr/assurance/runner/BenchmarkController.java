@@ -74,23 +74,36 @@ public class BenchmarkController {
     ) {
         BenchmarkParams params = new BenchmarkParams(
                 warmup, messages, payloadSize, artemis, pulsar,
-                Math.max(1, producerCount), Math.max(1, Math.min(runs, 5)));
+                Math.max(1, Math.min(producerCount, 8)),
+                Math.max(1, Math.min(runs, 5)));
         SseEmitter emitter = new SseEmitter(600_000L);
 
         executor.submit(() -> {
             try {
+                validateBenchParams(messages, payloadSize, producerCount, runs);
                 service.runStreaming(params, progress -> {
                     try { emitter.send(SseEmitter.event().data(mapper.writeValueAsString(progress))); }
                     catch (Exception e) { emitter.completeWithError(e); }
                 });
                 emitter.complete();
-            } catch (IllegalStateException e) {
+            } catch (IllegalArgumentException | IllegalStateException e) {
                 try { emitter.send(SseEmitter.event().name("bench-error").data(e.getMessage())); } catch (Exception ignored) {}
                 emitter.complete();
             } catch (Exception e) { emitter.completeWithError(e); }
         });
 
         return emitter;
+    }
+
+    private static void validateBenchParams(int messages, int payloadSize, int producerCount, int runs) {
+        if (messages < 100 || messages > 50_000)
+            throw new IllegalArgumentException("Messages hors borne : attendu 100–50 000, reçu " + messages);
+        if (payloadSize < 0 || payloadSize > 65_536)
+            throw new IllegalArgumentException("Payload hors borne : attendu 0–65 536 B, reçu " + payloadSize);
+        if (producerCount < 1 || producerCount > 8)
+            throw new IllegalArgumentException("Producteurs hors borne : attendu 1–8, reçu " + producerCount);
+        if (runs < 1 || runs > 5)
+            throw new IllegalArgumentException("Runs hors borne : attendu 1–5, reçu " + runs);
     }
 
     @GetMapping(value = "/benchmark/sweep/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

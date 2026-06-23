@@ -122,24 +122,29 @@
 ## Sprint 4 — Qualité et enrichissement méthodologique
 
 ### 4.1 Validation des paramètres (client + serveur)
-- [ ] Min/max : `messages` (1–50 000), `payloadSize` (0–65 536), `producerCount` (1–8), `runs` (1–5)
-- [ ] Message d'erreur lisible dans l'UI si hors bornes
+- [x] Client JS : garde `messages` (100–50 000), `payloadSize` (0–65 536), `producerCount` (1–8), `runs` (1–5) — erreur affichée dans `errBox`
+- [x] Serveur : `validateBenchParams()` dans `BenchmarkController` → `bench-error` SSE si hors bornes (doublon de sécurité)
 
 ### 4.2 Barre de progression multi-run fluide
-- [ ] Émettre des events `partial` pendant chaque run pour progression intra-run
+- [x] `benchmarkArtemisWithProgress` / `benchmarkPulsarWithProgress` : partials `run`/`totalRuns` corrects pendant chaque run
+- [x] `runStreamingMulti` : utilise ces variantes pour `producerCount = 1` ; mode parallèle inchangé
+- [x] Single-run (`streamArtemis`/`streamPulsar`) : refactorisé pour utiliser les mêmes variantes
 
-### 4.3 E2E partiels Pulsar (afficher vrai 0 vs manquant)
-- [ ] Passer `e2e[]` partiellement rempli dans les events `partial` (pas `new long[0]`)
-- [ ] Sentinelle `-1` pour "pas encore reçu" vs `0` pour "reçu instantanément"
+### 4.3 E2E partiels pendant le streaming
+- [x] `consumeAsync(int n, long[] recvNs)` : overload avec tableau externe dans `ArtemisBenchmarkClient` et `PulsarBenchmarkClient`
+- [x] `partialE2e(pub, sendNs, recvNs, sent)` : collecte les E2E des messages déjà reçus (recvNs[i] > 0)
+- [x] `partial()` : corrigé pour gérer des tableaux E2E de taille ≠ `sent` (eLen-based clamp)
+- [x] Approche sentinelle 0 : `recvNs` initialisé à zéro, 0 = pas encore reçu (suffisant pour ce POC)
 
 ### 4.4 Note de durabilité dans l'UI Comparatif
-- [ ] Afficher : "Artemis : journal tmpdir, fsync désactivé | Pulsar : BookKeeper standalone, fsync désactivé"
+- [x] Section "Conditions de durabilité (ce POC)" dans le tableau Comparatif
+- [x] Avertissement explicite "résultats valables en throughput relatif uniquement"
 
 ### 4.5 Option "mode séquentiel" documentée
-- [ ] Si stop-and-wait conservé comme option, labelliser clairement dans l'UI
+- [x] N/A : stop-and-wait définitivement supprimé en Sprint 1 — architecture unifiée concurrent pour les deux brokers
 
-**Commits :** à venir  
-**Statut : ⬜ EN ATTENTE**
+**Commits :** `fix(bench): sprint4 — validation params, multi-run partials, E2E progressif, note durabilité`  
+**Statut : ✅ TERMINÉ**
 
 ---
 
@@ -150,7 +155,7 @@
 | Sprint 1 | Validité des mesures | ✅ TERMINÉ |
 | Sprint 2 | Infrastructure robuste | ✅ TERMINÉ |
 | Sprint 3 | IHM honnête | ✅ TERMINÉ |
-| Sprint 4 | Qualité & enrichissement | ⬜ EN ATTENTE |
+| Sprint 4 | Qualité & enrichissement | ✅ TERMINÉ |
 
 ---
 
