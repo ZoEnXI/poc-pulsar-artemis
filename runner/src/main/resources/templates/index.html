@@ -305,6 +305,8 @@
             <th>Taille</th>
             <th id="sth-artemis" style="color:#f59e0b;display:none">Artemis p99</th>
             <th id="sth-pulsar"  style="color:#22d3ee;display:none">Pulsar p99</th>
+            <th id="sth-a-mb"    style="color:#f59e0b;opacity:.65;display:none">Artemis MB/s</th>
+            <th id="sth-p-mb"    style="color:#22d3ee;opacity:.65;display:none">Pulsar MB/s</th>
           </tr></thead>
           <tbody id="sweep-body"></tbody>
         </table>
@@ -415,7 +417,7 @@
         <div class="phase-count" id="dlt-cnt-DLT_DRAINING">—</div>
       </div>
     </div>
-    <div id="dlt-stats" style="display:none;margin-top:.8rem;display:none">
+    <div id="dlt-stats" style="display:none;margin-top:.8rem">
       <div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.78rem">
         <span style="color:#4ade80">✓ Acquittés&nbsp;: <strong id="dlt-stat-ok">—</strong></span>
         <span style="color:#f59e0b">↩ Nacks&nbsp;: <strong id="dlt-stat-nacks">—</strong></span>
@@ -535,6 +537,9 @@
 <div id="tab-comparatif" class="tab-content" style="display:none">
   <div class="card">
     <div class="card-header"><h2>Comparatif Artemis 2.36 vs Pulsar 4.2</h2></div>
+    <div id="cmp-warn-params" style="display:none;margin-bottom:.6rem;padding:.5rem .75rem;background:rgba(245,158,11,.1);border-left:3px solid #f59e0b;border-radius:4px;font-size:.78rem;color:#f59e0b">
+      ⚠ Un seul broker a été mesuré — la comparaison est incomplète.
+    </div>
     <table class="comp-table">
       <thead><tr>
         <th style="width:38%">Feature</th>
@@ -542,16 +547,29 @@
         <th class="col-p" style="width:31%">Apache Pulsar 4.2</th>
       </tr></thead>
       <tbody>
-        <tr class="comp-section"><td colspan="3">Résultats benchmark (dernier run — lancez l'onglet Benchmark)</td></tr>
+        <tr class="comp-section"><td colspan="3">Résultats benchmark (lancez l'onglet Benchmark)</td></tr>
+        <tr style="font-size:.72rem;color:#6b7280">
+            <td class="feature-label" style="font-style:italic">Conditions du run</td>
+            <td class="val-a" id="cmp-a-params"><span style="color:#4b5563">—</span></td>
+            <td class="val-p" id="cmp-p-params"><span style="color:#4b5563">—</span></td></tr>
         <tr><td class="feature-label">Latence pub p50</td>
             <td class="val-a" id="cmp-a-p50"><span style="color:#4b5563">—</span></td>
             <td class="val-p" id="cmp-p-p50"><span style="color:#4b5563">—</span></td></tr>
         <tr><td class="feature-label">Latence pub p99</td>
             <td class="val-a" id="cmp-a-p99"><span style="color:#4b5563">—</span></td>
             <td class="val-p" id="cmp-p-p99"><span style="color:#4b5563">—</span></td></tr>
+        <tr><td class="feature-label">Latence pub p99.9</td>
+            <td class="val-a" id="cmp-a-p999"><span style="color:#4b5563">—</span></td>
+            <td class="val-p" id="cmp-p-p999"><span style="color:#4b5563">—</span></td></tr>
         <tr><td class="feature-label">Latence E2E p50</td>
             <td class="val-a" id="cmp-a-e50"><span style="color:#4b5563">—</span></td>
             <td class="val-p" id="cmp-p-e50"><span style="color:#4b5563">—</span></td></tr>
+        <tr><td class="feature-label">Latence E2E p99</td>
+            <td class="val-a" id="cmp-a-e99"><span style="color:#4b5563">—</span></td>
+            <td class="val-p" id="cmp-p-e99"><span style="color:#4b5563">—</span></td></tr>
+        <tr><td class="feature-label">Latence E2E p99.9</td>
+            <td class="val-a" id="cmp-a-e999"><span style="color:#4b5563">—</span></td>
+            <td class="val-p" id="cmp-p-e999"><span style="color:#4b5563">—</span></td></tr>
         <tr><td class="feature-label">Débit max (msg/s)</td>
             <td class="val-a" id="cmp-a-tp"><span style="color:#4b5563">—</span></td>
             <td class="val-p" id="cmp-p-tp"><span style="color:#4b5563">—</span></td></tr>
@@ -641,9 +659,10 @@
   const resSec  = document.getElementById('results-section');
   const runMeta = document.getElementById('run-meta');
 
-  let activeEs = null, bState = {}, chartPub = null, chartE2e = null;
+  let activeEs = null, bState = {}, bParams = null, chartPub = null, chartE2e = null;
   let expectedDone = new Set(), doneBrokers = new Set();
   let bRuns = 1;  // total runs for current benchmark
+  let streamDone = false;
 
   const f2    = v => v > 0 ? v.toFixed(2) + ' ms' : '—';
   const ftp   = v => v > 0 ? Math.round(v).toLocaleString('fr-FR') + ' msg/s' : '—';
@@ -698,6 +717,7 @@
     if (chartPub) { chartPub.destroy(); chartPub = null; }
     if (chartE2e) { chartE2e.destroy(); chartE2e = null; }
     bState = {};
+    streamDone = false;
   }
 
   function updateProgress(p) {
@@ -748,7 +768,7 @@
     ];
     function rowHtml(m, sub) {
       const aWins = both && (m.lower ? m.ka < m.kp : m.ka > m.kp);
-      const pWins = both && !aWins;
+      const pWins = both && (m.lower ? m.kp < m.ka : m.kp > m.ka);
       const cls   = sub ? 'sub-metric' : 'metric';
       const aStd  = m.stdA ? `<span style="color:#6b7280;font-weight:400;font-size:.72em"> ± ${m.stdA.toFixed(2)} ms</span>` : '';
       const pStd  = m.stdP ? `<span style="color:#6b7280;font-weight:400;font-size:.72em"> ± ${m.stdP.toFixed(2)} ms</span>` : '';
@@ -784,7 +804,7 @@
       data: { labels: ['p50', 'p99', 'p99.9'], datasets },
       options: { responsive: true, maintainAspectRatio: false,
         plugins: { legend: { labels: { color: '#9ca3af', font: { size: 12 } } },
-                   tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms` } } },
+                   tooltip: { callbacks: { label: c => c.parsed.y != null ? `${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms` : null } } },
         scales: {
           x: { ticks: { color: '#6b7280' }, grid: { color: '#1a1d2e' } },
           y: { ticks: { color: '#6b7280', callback: v => v + ' ms' }, grid: { color: '#2d3148' },
@@ -815,8 +835,9 @@
     const incP = document.getElementById('chk-pulsar').checked;
     if (!incA && !incP) { errBox.textContent = 'Sélectionne au moins un broker.'; errBox.style.display = 'block'; return; }
     const e2eNote = +producerCount === 1 ? ' · E2E activé' : ' · pub only (parallèle)';
-    const pl = +payloadSize > 0 ? `${payloadSize} B` : 'ContratEvent JSON';
+    const pl = +payloadSize > 0 ? `${payloadSize} B` : 'ContratEvent JSON (~150 B)';
     const runsNote = runs > 1 ? ` · ${runs} runs` : '';
+    bParams = { messages: +messages, payloadLabel: pl, producerCount: +producerCount, runs };
     resetBench(incA, incP, `warmup ${warmup} · ${(+messages).toLocaleString('fr-FR')} msgs · ${pl} · ${producerCount} prod.${e2eNote}${runsNote}`);
     btnRun.disabled = true; btnRun.textContent = 'En cours…'; btnStop.style.display = '';
     expectedDone = new Set(); doneBrokers = new Set(); bRuns = runs;
@@ -828,17 +849,21 @@
       const p = JSON.parse(ev.data);
       updateProgress(p);
       // En mode multi-run, le vrai "done" est l'événement avec p99StddevMs > 0 (ou runs=1)
-      if (p.done) {
-        const isFinal = p.totalRuns <= 1 || p.p99StddevMs > 0;
-        if (isFinal) {
-          doneBrokers.add(p.broker);
-          if ([...expectedDone].every(b => doneBrokers.has(b))) {
-            activeEs.close(); activeEs = null; renderCharts(); finishBench();
-          }
+      if (p.done && p.isFinalRun === true) {
+        doneBrokers.add(p.broker);
+        if ([...expectedDone].every(b => doneBrokers.has(b))) {
+          streamDone = true;
+          activeEs.close(); activeEs = null; renderCharts(); finishBench();
         }
       }
     };
+    activeEs.addEventListener('bench-error', ev => {
+      if (activeEs) { activeEs.close(); activeEs = null; }
+      errBox.textContent = ev.data || 'Benchmark déjà en cours — réessayez dans quelques instants.';
+      errBox.style.display = 'block'; finishBench();
+    });
     activeEs.onerror = () => {
+      if (streamDone) return;
       if (activeEs) { activeEs.close(); activeEs = null; }
       errBox.textContent = 'Erreur SSE — vérifie les logs Spring Boot.';
       errBox.style.display = 'block'; finishBench();
@@ -1041,6 +1066,8 @@
     swBody.innerHTML = '';
     document.getElementById('sth-artemis').style.display = incA ? '' : 'none';
     document.getElementById('sth-pulsar').style.display  = incP ? '' : 'none';
+    document.getElementById('sth-a-mb').style.display    = incA ? '' : 'none';
+    document.getElementById('sth-p-mb').style.display    = incP ? '' : 'none';
     swSt.textContent = '';
 
     if (sweepChart) { sweepChart.destroy(); sweepChart = null; }
@@ -1050,14 +1077,24 @@
         labels: [],
         datasets: [
           ...(incA ? [{
-            label: 'Artemis p99', data: [],
+            label: 'Artemis p99', data: [], yAxisID: 'y',
             borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.08)',
             tension: .35, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2,
           }] : []),
           ...(incP ? [{
-            label: 'Pulsar p99', data: [],
+            label: 'Pulsar p99', data: [], yAxisID: 'y',
             borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,.08)',
             tension: .35, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2,
+          }] : []),
+          ...(incA ? [{
+            label: 'Artemis MB/s', data: [], yAxisID: 'y1',
+            borderColor: 'rgba(245,158,11,.45)', backgroundColor: 'transparent',
+            borderDash: [4, 3], tension: .35, pointRadius: 3, pointHoverRadius: 5, borderWidth: 1.5,
+          }] : []),
+          ...(incP ? [{
+            label: 'Pulsar MB/s', data: [], yAxisID: 'y1',
+            borderColor: 'rgba(34,211,238,.45)', backgroundColor: 'transparent',
+            borderDash: [4, 3], tension: .35, pointRadius: 3, pointHoverRadius: 5, borderWidth: 1.5,
           }] : []),
         ],
       },
@@ -1065,7 +1102,12 @@
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { labels: { color: '#9ca3af', font: { size: 12 } } },
-          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms` } },
+          tooltip: { callbacks: { label: c => {
+            if (c.parsed.y == null) return null;
+            return c.dataset.yAxisID === 'y1'
+              ? `${c.dataset.label}: ${c.parsed.y.toFixed(2)} MB/s`
+              : `${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms`;
+          }}},
         },
         scales: {
           x: { ticks: { color: '#6b7280' }, grid: { color: '#1a1d2e' } },
@@ -1074,12 +1116,22 @@
             grid: { color: '#2d3148' },
             title: { display: true, text: 'latence p99 (ms)', color: '#6b7280', font: { size: 11 } },
           },
+          y1: {
+            position: 'right',
+            ticks: { color: '#4b5563', callback: v => v.toFixed(1) + ' MB/s' },
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: 'débit (MB/s)', color: '#4b5563', font: { size: 10 } },
+          },
         },
       },
     });
 
+    // indices datasets : [A-p99?, P-p99?, A-MB/s?, P-MB/s?]
     let dsA = incA ? 0 : -1;
     let dsP = incP ? (incA ? 1 : 0) : -1;
+    let dsAMb = incA ? (incA && incP ? 2 : 1) : -1;
+    let dsPMb = incP ? (incA && incP ? 3 : (incA ? 2 : 1)) : -1;
+    let sweepDone = false;
 
     sweepEs = new EventSource(`/benchmark/sweep/stream?warmup=${warmup}&messages=${messages}&artemis=${incA}&pulsar=${incP}`);
     sweepEs.onmessage = ev => {
@@ -1091,25 +1143,41 @@
       }
 
       if (d.phase === 'POINT') {
+        const aMs  = d.artemisP99Ms  != null ? +d.artemisP99Ms  : null;
+        const pMs  = d.pulsarP99Ms   != null ? +d.pulsarP99Ms   : null;
+        const aMb  = d.artemisThroughputMbSec != null ? +d.artemisThroughputMbSec : null;
+        const pMb  = d.pulsarThroughputMbSec  != null ? +d.pulsarThroughputMbSec  : null;
+
         sweepChart.data.labels.push(d.sizeLabel);
-        if (dsA >= 0) sweepChart.data.datasets[dsA].data.push(+d.artemisP99Ms.toFixed(3));
-        if (dsP >= 0) sweepChart.data.datasets[dsP].data.push(+d.pulsarP99Ms.toFixed(3));
+        if (dsA   >= 0) sweepChart.data.datasets[dsA  ].data.push(aMs  != null ? +aMs.toFixed(3)  : null);
+        if (dsP   >= 0) sweepChart.data.datasets[dsP  ].data.push(pMs  != null ? +pMs.toFixed(3)  : null);
+        if (dsAMb >= 0) sweepChart.data.datasets[dsAMb].data.push(aMb  != null ? +aMb.toFixed(3)  : null);
+        if (dsPMb >= 0) sweepChart.data.datasets[dsPMb].data.push(pMb  != null ? +pMb.toFixed(3)  : null);
         sweepChart.update();
 
-        const artCell = incA ? `<td class="val-a">${d.artemisP99Ms.toFixed(2)} ms</td>` : '';
-        const pulCell = incP ? `<td class="val-p">${d.pulsarP99Ms.toFixed(2)} ms</td>` : '';
+        const artCell   = incA ? `<td class="val-a">${aMs  != null ? aMs.toFixed(2)  + ' ms' : '—'}</td>` : '';
+        const pulCell   = incP ? `<td class="val-p">${pMs  != null ? pMs.toFixed(2)  + ' ms' : '—'}</td>` : '';
+        const artMbCell = incA ? `<td class="val-a" style="opacity:.7">${aMb != null ? aMb.toFixed(2) + ' MB/s' : '—'}</td>` : '';
+        const pulMbCell = incP ? `<td class="val-p" style="opacity:.7">${pMb != null ? pMb.toFixed(2) + ' MB/s' : '—'}</td>` : '';
         swBody.insertAdjacentHTML('beforeend',
-          `<tr><td class="metric">${d.sizeLabel}</td>${artCell}${pulCell}</tr>`);
+          `<tr><td class="metric">${d.sizeLabel}</td>${artCell}${pulCell}${artMbCell}${pulMbCell}</tr>`);
         swSt.textContent = `${d.sizeIndex + 1} / ${d.totalSizes} tailles mesurées`;
       }
 
       if (d.phase === 'DONE') {
+        sweepDone = true;
         sweepEs.close(); sweepEs = null;
         swSt.textContent = 'Sweep terminé.';
         btnSw.disabled = false; btnSw.textContent = 'Lancer le sweep';
       }
     };
+    sweepEs.addEventListener('bench-error', ev => {
+      if (sweepEs) { sweepEs.close(); sweepEs = null; }
+      swErr.textContent = ev.data || 'Benchmark déjà en cours.'; swErr.style.display = 'block';
+      btnSw.disabled = false; btnSw.textContent = 'Lancer le sweep';
+    });
     sweepEs.onerror = () => {
+      if (sweepDone) return;
       if (sweepEs) { sweepEs.close(); sweepEs = null; }
       swErr.textContent = 'Erreur SSE — vérifie les logs.'; swErr.style.display = 'block';
       btnSw.disabled = false; btnSw.textContent = 'Lancer le sweep';
@@ -1266,18 +1334,45 @@
      ═══════════════════════════════════════════════════════════ */
   function syncComparatif() {
     const a = bState['artemis'], p = bState['pulsar'];
-    const set = (id, val) => { document.getElementById(id).textContent = val; };
+    const empty = `<span style="color:#4b5563">—</span>`;
+    const set   = (id, val) => { document.getElementById(id).innerHTML = val; };
+    const ms2   = v => v > 0 ? v.toFixed(2) + ' ms' : empty;
+    const params = bp => bp
+      ? `${bp.messages.toLocaleString('fr-FR')} msgs · ${bp.payloadLabel} · ${bp.producerCount} prod. · ${bp.runs} run${bp.runs > 1 ? 's' : ''}`
+      : '—';
+
     if (a?.done) {
-      set('cmp-a-p50', a.p50Ms.toFixed(2) + ' ms');
-      set('cmp-a-p99', a.p99Ms.toFixed(2) + ' ms');
-      set('cmp-a-e50', a.e2eP50Ms > 0 ? a.e2eP50Ms.toFixed(2) + ' ms' : '— (parallèle)');
-      set('cmp-a-tp',  Math.round(a.throughputMsgSec).toLocaleString('fr-FR') + ' msg/s');
+      set('cmp-a-params', params(bParams));
+      set('cmp-a-p50',  ms2(a.p50Ms));
+      set('cmp-a-p99',  ms2(a.p99Ms));
+      set('cmp-a-p999', ms2(a.p999Ms));
+      set('cmp-a-e50',  a.e2eP50Ms  > 0 ? ms2(a.e2eP50Ms)  : '— (parallèle)');
+      set('cmp-a-e99',  a.e2eP99Ms  > 0 ? ms2(a.e2eP99Ms)  : '—');
+      set('cmp-a-e999', a.e2eP999Ms > 0 ? ms2(a.e2eP999Ms) : '—');
+      set('cmp-a-tp',   Math.round(a.throughputMsgSec).toLocaleString('fr-FR') + ' msg/s');
+    } else {
+      ['cmp-a-params','cmp-a-p50','cmp-a-p99','cmp-a-p999',
+       'cmp-a-e50','cmp-a-e99','cmp-a-e999','cmp-a-tp'].forEach(id => set(id, empty));
     }
+
     if (p?.done) {
-      set('cmp-p-p50', p.p50Ms.toFixed(2) + ' ms');
-      set('cmp-p-p99', p.p99Ms.toFixed(2) + ' ms');
-      set('cmp-p-e50', p.e2eP50Ms > 0 ? p.e2eP50Ms.toFixed(2) + ' ms' : '— (dispatch async)');
-      set('cmp-p-tp',  Math.round(p.throughputMsgSec).toLocaleString('fr-FR') + ' msg/s');
+      set('cmp-p-params', params(bParams));
+      set('cmp-p-p50',  ms2(p.p50Ms));
+      set('cmp-p-p99',  ms2(p.p99Ms));
+      set('cmp-p-p999', ms2(p.p999Ms));
+      set('cmp-p-e50',  p.e2eP50Ms  > 0 ? ms2(p.e2eP50Ms)  : '— (async consumer)');
+      set('cmp-p-e99',  p.e2eP99Ms  > 0 ? ms2(p.e2eP99Ms)  : '—');
+      set('cmp-p-e999', p.e2eP999Ms > 0 ? ms2(p.e2eP999Ms) : '—');
+      set('cmp-p-tp',   Math.round(p.throughputMsgSec).toLocaleString('fr-FR') + ' msg/s');
+    } else {
+      ['cmp-p-params','cmp-p-p50','cmp-p-p99','cmp-p-p999',
+       'cmp-p-e50','cmp-p-e99','cmp-p-e999','cmp-p-tp'].forEach(id => set(id, empty));
+    }
+
+    // Avertissement si les params Artemis et Pulsar diffèrent (run partiel sur un seul broker)
+    const warnEl = document.getElementById('cmp-warn-params');
+    if (warnEl) {
+      warnEl.style.display = (a?.done && !p?.done) || (!a?.done && p?.done) ? 'block' : 'none';
     }
   }
 

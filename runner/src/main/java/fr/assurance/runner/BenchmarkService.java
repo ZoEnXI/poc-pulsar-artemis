@@ -153,7 +153,7 @@ public class BenchmarkService {
                 m.messagesSent(), m.messagesSent(),
                 m.p50Ms(), m.p99Ms(), m.p999Ms(), m.throughputMsgSec(),
                 m.e2eP50Ms(), m.e2eP99Ms(), m.e2eP999Ms(),
-                run, totalRuns, 0, 0);
+                run, totalRuns, 0, 0, false);
     }
 
     private static BenchmarkProgress stddevEvt(String broker, int runs,
@@ -170,7 +170,7 @@ public class BenchmarkService {
         return new BenchmarkProgress(broker, true,
                 ms[0].messagesSent(), ms[0].messagesSent(),
                 p50, p99, p999, tp, e50, e99, e999,
-                runs, runs, stdP99, stdE99);
+                runs, runs, stdP99, stdE99, true);
     }
 
     // ── Sweep — p99 et débit vs taille payload ────────────────────────────────
@@ -449,7 +449,7 @@ public class BenchmarkService {
                 toMs(se[clamp(sent, 0.50)]),
                 toMs(se[clamp(sent, 0.99)]),
                 toMs(se[clamp(sent, 0.999)]),
-                run, totalRuns, 0, 0);
+                run, totalRuns, 0, 0, false);
     }
 
     private static BenchmarkProgress finalEvt(String broker, int n,
@@ -467,14 +467,14 @@ public class BenchmarkService {
                 hasE2e ? toMs(se[clamp(n, 0.50)])  : 0,
                 hasE2e ? toMs(se[clamp(n, 0.99)])  : 0,
                 hasE2e ? toMs(se[clamp(n, 0.999)]) : 0,
-                run, totalRuns, 0, 0);
+                run, totalRuns, 0, 0, true);
     }
 
     private static BenchmarkProgress parProgress(String broker, int sent, int total,
                                                    long elapsedNs, int run, int totalRuns) {
         return new BenchmarkProgress(broker, false, sent, total,
                 0, 0, 0, sent / (elapsedNs / 1e9), 0, 0, 0,
-                run, totalRuns, 0, 0);
+                run, totalRuns, 0, 0, false);
     }
 
     private static BenchmarkResult.BrokerMetrics toMetrics(int n, long[] pub, long[] e2e, long elapsedNs) {

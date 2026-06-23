@@ -19,5 +19,7 @@ public record BenchmarkProgress(
         int totalRuns,
         // Stddev inter-runs (0 pour single run ou événements intermédiaires)
         double p99StddevMs,
-        double e2eP99StddevMs
+        double e2eP99StddevMs,
+        // true uniquement sur l'événement terminal (single run final ou stddev multi-runs)
+        boolean isFinalRun
 ) {}

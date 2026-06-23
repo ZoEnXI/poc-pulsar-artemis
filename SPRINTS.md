@@ -81,37 +81,41 @@
 ## Sprint 3 — IHM : affichage honnête et robuste
 
 ### 3.1 Remettre à zéro `bState` au lancement d'un nouveau run
-- [ ] `bState[broker] = null` au clic "Lancer", avant ouverture SSE
-- [ ] `syncComparatif()` n'affiche rien si `bState` vide pour un broker
+- [x] `bState = {}` dans `resetBench()` (déjà présent) + `streamDone = false`
+- [x] `syncComparatif()` : efface activement les cellules des brokers absents (innerHTML = `<span>—</span>`)
 
 ### 3.2 Afficher les paramètres du run dans le Comparatif
-- [ ] Ligne d'en-tête : Messages / Payload / Producteurs / Runs pour chaque colonne
-- [ ] Avertissement si paramètres différents entre Artemis et Pulsar
+- [x] Ligne "Conditions du run" : `bParams` capturé au submit, affiché par `syncComparatif()`
+- [x] Bandeau avertissement `#cmp-warn-params` si un seul broker mesuré
 
 ### 3.3 Ajouter p99.9 au tableau Comparatif
-- [ ] Aligner avec l'onglet Benchmark (même ensemble de métriques)
+- [x] Lignes `cmp-a-p999 / cmp-p-p999`, `cmp-a-e99 / cmp-p-e99`, `cmp-a-e999 / cmp-p-e999`
 
 ### 3.4 Corriger la détection de fin de stream multi-runs
-- [ ] Ajouter `isFinalRun: boolean` dans `BenchmarkProgress`
-- [ ] Remplacer `p.p99StddevMs > 0` par `p.isFinalRun === true`
+- [x] `boolean isFinalRun` ajouté à `BenchmarkProgress`
+- [x] Tous les constructeurs dans `BenchmarkService` mis à jour (false/true selon position)
+- [x] JS : `p.isFinalRun === true` remplace `p.p99StddevMs > 0`
 
 ### 3.5 Corriger les `TypeError` en sweep (`.toFixed()` sur `undefined`)
-- [ ] Guard `v != null ? (+v).toFixed(3) : null` avant chaque accès
-- [ ] Passer `null` aux datasets Chart.js pour les points manquants
-- [ ] Afficher MB/s dans le graphe sweep (second axe Y) — reporté de Sprint 1.6
+- [x] Guards `d.artemisP99Ms != null ? ... : null` avant tout accès
+- [x] `null` passé aux datasets Chart.js pour points manquants
+- [x] MB/s affiché dans le graphe sweep (second axe Y `y1`) + colonnes dans la table
 
 ### 3.6 Corriger le tooltip Chart.js (crash sur valeur `null`)
-- [ ] `` label: c => c.parsed.y != null ? `${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms` : 'N/A' ``
+- [x] `c.parsed.y != null ? ... : null` dans tous les callbacks `label` (chart pub, e2e, sweep)
 
 ### 3.7 Corriger le badge d'égalité (▲ attribué à Pulsar si égaux)
-- [ ] `pWins = both && (m.lower ? m.kp < m.ka : m.kp > m.ka)` (false si égalité stricte)
+- [x] `pWins = both && (m.lower ? m.kp < m.ka : m.kp > m.ka)` — false si stricte égalité
 
 ### 3.8 Corriger le faux "Erreur SSE" à la fermeture normale
-- [ ] Flag `let streamDone = false` → `true` sur dernier event ; `onerror` ne signale que si `!streamDone`
-- [ ] Gérer l'event `name("error")` envoyé par le serveur en cas de mutex (message "déjà en cours")
+- [x] `let streamDone = false` → `true` avant `activeEs.close()` sur dernier event
+- [x] `onerror` : `if (streamDone) return;`
+- [x] Event serveur renommé `bench-error` (controller) + `addEventListener('bench-error', ...)` côté JS
+- [x] Idem pour sweep : `sweepDone` flag + `bench-error` listener
+- [x] Fix cosmétique : `dlt-stats` `display:none` dupliqué supprimé
 
-**Commits :** à venir  
-**Statut : ⬜ EN ATTENTE**
+**Commits :** `fix(ihm): sprint3 — comparatif complet, isFinalRun, MB/s sweep, guards, streamDone`  
+**Statut : ✅ TERMINÉ**
 
 ---
 
@@ -145,7 +149,7 @@
 |--------|-------|--------|
 | Sprint 1 | Validité des mesures | ✅ TERMINÉ |
 | Sprint 2 | Infrastructure robuste | ✅ TERMINÉ |
-| Sprint 3 | IHM honnête | ⬜ EN ATTENTE |
+| Sprint 3 | IHM honnête | ✅ TERMINÉ |
 | Sprint 4 | Qualité & enrichissement | ⬜ EN ATTENTE |
 
 ---

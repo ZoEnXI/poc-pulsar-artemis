@@ -85,7 +85,7 @@ public class BenchmarkController {
                 });
                 emitter.complete();
             } catch (IllegalStateException e) {
-                try { emitter.send(SseEmitter.event().name("error").data(e.getMessage())); } catch (Exception ignored) {}
+                try { emitter.send(SseEmitter.event().name("bench-error").data(e.getMessage())); } catch (Exception ignored) {}
                 emitter.complete();
             } catch (Exception e) { emitter.completeWithError(e); }
         });
@@ -112,7 +112,7 @@ public class BenchmarkController {
                 });
                 emitter.complete();
             } catch (IllegalStateException e) {
-                try { emitter.send(SseEmitter.event().name("error").data(e.getMessage())); } catch (Exception ignored) {}
+                try { emitter.send(SseEmitter.event().name("bench-error").data(e.getMessage())); } catch (Exception ignored) {}
                 emitter.complete();
             } catch (Exception e) { emitter.completeWithError(e); }
         });
