@@ -42,40 +42,71 @@ http://localhost:8080/
 
 ---
 
-## IHM
+## IHM — 3 onglets
+
+### Onglet 1 — Benchmark
 
 ```
-┌─ Initialisation ───────────────────────────────────────────┐
-│  [ Vérifier les brokers ]   Artemis — prêt   Pulsar — prêt │
-├─ Paramètres du test de charge ─────────────────────────────┤
-│  Warmup · Messages mesurés · Taille payload                 │
-│  Producteurs parallèles · Nombre de runs · Brokers          │
-│  [ Lancer le test ]  [ Annuler ]                            │
-├─ Progression ──────────────────────────────────────────────┤
-│  Artemis ████████████░░░░  1 400 / 2 000                    │
-│  Pulsar  ░░░░░░░░░░░░░░░░  en attente…                      │
-├─ Résultats ────────────────────────────────────────────────┤
-│          Artemis          Pulsar                            │
-│  p50      X.XX ± Y ms     X.XX ± Y ms   ▲                  │
-│  p99      X.XX ms         X.XX ms                           │
-│  p99.9    X.XX ms         X.XX ms                           │
-│  Débit    X XXX msg/s     X XXX msg/s   ▲                   │
-│  [Bar chart Chart.js p50 / p99 / p99.9]                     │
-├─ Sweep taille de payload ──────────────────────────────────┤
-│  [Line chart latence p50/p99 vs 128B … 64 KB]               │
-└────────────────────────────────────────────────────────────┘
+┌─ Initialisation ──────────────────────────────────────────────┐
+│  [ Vérifier les brokers ]   Artemis — prêt   Pulsar — prêt    │
+├─ Paramètres du test de charge ────────────────────────────────┤
+│  Warmup · Messages mesurés · Taille payload (0–65 536 B)      │
+│  Producteurs parallèles (1–8) · Runs (1–5) · Brokers          │
+│  [ Lancer le test ]  [ Annuler ]                              │
+├─ Progression (streaming SSE intra-run) ───────────────────────┤
+│  Artemis ████████████░░░░  1 400 / 2 000  p99 : 0.42 ms       │
+│  Pulsar  ████░░░░░░░░░░░░    600 / 2 000  p99 : 0.18 ms       │
+├─ Résultats ───────────────────────────────────────────────────┤
+│          Artemis              Pulsar                           │
+│  p50      X.XX ms             X.XX ms   ▲                     │
+│  p99      X.XX ± Y ms         X.XX ms                         │
+│  p99.9    X.XX ms             X.XX ms                         │
+│  Débit    X XXX msg/s         X XXX msg/s  ▲                  │
+│  E2E p50  X.XX ms             X.XX ms                         │
+│  E2E p99  X.XX ms             X.XX ms                         │
+│  [Bar chart Chart.js : p50 / p99 / p99.9, pub + E2E]          │
+├─ Payload Sweep (128 B → 64 KB) ───────────────────────────────┤
+│  [Line chart : latence p99 (ms) axe gauche]                    │
+│  [Line chart : débit MB/s axe droit, en pointillés]            │
+│  [Table : Taille | Artemis p99 | Pulsar p99 | MB/s × 2]       │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-### Paramètres
+### Onglet 2 — Fonctionnalités Pulsar
 
-| Paramètre | Défaut | Description |
-|---|---|---|
-| Warmup | 200 | Messages de chauffe (JIT, cache) — non mesurés |
-| Messages mesurés | 2 000 | Fenêtre de mesure par broker |
-| Taille payload | 0 | 0 = `ContratEvent` JSON (~150 B) ; sinon N octets aléatoires |
-| Producteurs parallèles | 1 | Threads producteurs concurrents par broker |
-| Nombre de runs | 1 | Répète le test 1 à 5 fois, affiche moyenne ± écart-type |
-| Brokers | Artemis + Pulsar | Cocher/décocher pour exclure un broker |
+Quatre démos interactives SSE illustrant les fonctionnalités exclusives de Pulsar :
+
+| Démo | Description |
+|------|-------------|
+| **Key_Shared** | N consumers partagent une subscription ; Pulsar garantit que chaque clé (ex. `contractId`) est toujours routée vers le même consumer via un anneau de hachage broker-side. |
+| **Message Replay** | Messages relus depuis le début via l'API `Reader` après acquittement complet — rendu possible par la rétention configurable (ici 60 min / 100 MB sur `public/demo`). |
+| **Dead Letter Topic** | Messages empoisonnés reroutés automatiquement vers un DLT après `maxRedeliverCount` tentatives — 0 perte, messages récupérables pour audit. |
+| **Fan-out** | Deux subscriptions indépendantes sur le même topic reçoivent chacune l'intégralité du flux sans coordination ni duplication de données. |
+
+### Onglet 3 — Comparatif
+
+Tableau statique Artemis vs Pulsar (subscription types, persistence, replay, opérationnel)
+enrichi dynamiquement avec les résultats du dernier benchmark :
+- Conditions du run (messages / payload / producteurs / runs)
+- Latences pub p50 / p99 / p99.9 et E2E
+- Débit msg/s
+- Note de durabilité : journal tmpdir + fsync désactivé dans ce POC → résultats relatifs uniquement
+- Bandeau avertissement si les deux brokers n'ont pas été mesurés dans le même run
+
+---
+
+## Paramètres du benchmark
+
+| Paramètre | Défaut | Bornes | Description |
+|-----------|--------|--------|-------------|
+| Warmup | 200 | 0–5 000 | Messages de chauffe (JIT, cache) — non mesurés |
+| Messages mesurés | 2 000 | **100–50 000** | Fenêtre de mesure par broker |
+| Taille payload | 0 | **0–65 536 B** | 0 = `ContratEvent` JSON (~150 B) ; N = N octets aléatoires |
+| Producteurs parallèles | 1 | **1–8** | Threads producteurs concurrents (> 1 = pub-only, E2E désactivé) |
+| Nombre de runs | 1 | **1–5** | Répète le test N fois, affiche moyenne ± écart-type (Bessel) |
+| Brokers | A + P | — | Cocher/décocher pour exclure un broker |
+
+Les bornes sont vérifiées côté client (erreur inline) **et** côté serveur (event `bench-error` SSE).
 
 ---
 
@@ -86,9 +117,13 @@ http://localhost:8080/
 | `GET` | `/` | IHM Thymeleaf |
 | `GET` | `/benchmark/health` | Probe les deux brokers (1 msg aller-retour) |
 | `GET` | `/benchmark/durability` | Infos durabilité des deux brokers |
-| `GET` | `/benchmark/stream` | Flux SSE en temps réel (paramètres ci-dessous) |
-| `GET` | `/benchmark/sweep/stream` | Sweep taille payload 128 B → 64 KB via SSE |
-| `GET` | `/benchmark` | Run synchrone JSON (legacy, pour scripting) |
+| `GET` | `/benchmark/stream` | Flux SSE benchmark (paramètres ci-dessous) |
+| `GET` | `/benchmark/sweep/stream` | Sweep payload 128 B → 64 KB via SSE |
+| `GET` | `/benchmark` | Run synchrone JSON (legacy, scripting) |
+| `GET` | `/pulsar/key-shared/stream` | Démo Key_Shared SSE |
+| `GET` | `/pulsar/replay/stream` | Démo Message Replay SSE |
+| `GET` | `/pulsar/dlt/stream` | Démo Dead Letter Topic SSE |
+| `GET` | `/pulsar/fanout/stream` | Démo Fan-out SSE |
 
 Paramètres de `/benchmark/stream` :
 
@@ -99,11 +134,11 @@ Paramètres de `/benchmark/stream` :
 ### Exemple curl
 
 ```bash
-# Run JSON complet (bloquant)
-curl "http://localhost:8080/benchmark?warmup=100&messages=1000"
-
 # Health check
 curl http://localhost:8080/benchmark/health
+
+# Run JSON complet (bloquant)
+curl "http://localhost:8080/benchmark?warmup=100&messages=1000"
 
 # Sweep payload (SSE)
 curl -N "http://localhost:8080/benchmark/sweep/stream?warmup=50&messages=500"
@@ -119,24 +154,31 @@ compilation/packaging.
 
 ```
 poc-pulsar-artemis/
-├── pom.xml                         # unique POM (Spring Boot 3.3.5, Java 17)
-├── broker-artemis/src/main/java/
-│   └── …/artemis/
-│       ├── EmbeddedArtemisServer   # démarre EmbeddedActiveMQ sur port libre
-│       └── ArtemisBenchmarkClient  # prod/conso Core protocol, mode producerOnly
-├── broker-pulsar/src/main/java/
-│   └── …/pulsar/
-│       ├── EmbeddedPulsarServer    # ZooKeeper + BookKeeper + PulsarService
-│       └── PulsarBenchmarkClient   # prod/conso binaire Pulsar, mode producerOnly
+├── pom.xml                              # unique POM (Spring Boot 3.3.5, Java 17)
+├── SPRINTS.md                           # suivi des 4 sprints de correction
+├── broker-artemis/src/main/java/…/artemis/
+│   ├── EmbeddedArtemisServer            # démarre EmbeddedActiveMQ sur port libre
+│   └── ArtemisBenchmarkClient           # prod/conso Core protocol, producerOnly
+│       # consumeAsync(n, long[] recvNs) : tableau externe pour E2E progressif
+├── broker-pulsar/src/main/java/…/pulsar/
+│   ├── EmbeddedPulsarServer             # ZooKeeper + BookKeeper + PulsarService
+│   └── PulsarBenchmarkClient            # prod/conso Pulsar, producerOnly
+│       # consumeAsync(n, long[] recvNs) : idem
 └── runner/src/main/
     ├── java/…/runner/
-    │   ├── RunnerApplication       # démarre les deux serveurs comme beans Spring
-    │   ├── BenchmarkParams         # record des paramètres (warmup, messages, …)
-    │   ├── BenchmarkProgress       # record émis dans le flux SSE
-    │   ├── BenchmarkResult         # record résultat final (legacy JSON)
-    │   ├── BenchmarkService        # orchestration : single + multi-run + sweep
-    │   ├── BenchmarkController     # endpoints REST + SSE + Thymeleaf
-    │   └── domain/ContratEvent     # événement métier assurance (SOUSCRIPTION, …)
+    │   ├── RunnerApplication            # démarre les deux serveurs comme beans Spring
+    │   ├── BenchmarkParams              # record paramètres (warmup, messages, …)
+    │   ├── BenchmarkProgress            # record SSE (isFinalRun, e2e*, p99StddevMs)
+    │   ├── BenchmarkResult              # record résultat final (legacy JSON)
+    │   ├── SweepPoint / SweepProgress   # records SSE sweep (artemis/pulsarThroughputMbSec)
+    │   ├── BenchmarkService             # orchestration : single + multi-run + sweep
+    │   │   # modèle concurrent : consumeAsync() démarre avant la boucle send
+    │   │   # benchmarkArtemisWithProgress / benchmarkPulsarWithProgress : partials
+    │   │   # partialE2e() : E2E progressif pendant le streaming
+    │   ├── BenchmarkController          # REST + SSE + Thymeleaf + validateBenchParams()
+    │   └── pulsar/
+    │       ├── PulsarFeaturesController # 4 endpoints SSE démos Pulsar
+    │       └── PulsarFeaturesService    # Key_Shared, Replay, DLT, Fan-out
     └── resources/templates/index.html
 ```
 
@@ -150,6 +192,7 @@ poc-pulsar-artemis/
 | Spring Boot | 3.3.5 |
 | ActiveMQ Artemis | 2.36.0 |
 | Apache Pulsar | 4.2.2 |
+| Chart.js | 4.4.4 |
 
 > **Compatibilité Spring Boot / Pulsar :** Pulsar 4.2.2 nécessite plusieurs overrides
 > de dépendances dans le `pom.xml` (Jetty 12.1.10, Jersey 2.42, OpenTelemetry 1.56,
@@ -158,18 +201,43 @@ poc-pulsar-artemis/
 
 ---
 
-## Mesures et interprétation
+## Architecture de mesure
 
-- **Latence publish** : `nanoTime` avant/après `send()` **synchrone et bloquant** —
-  inclut le round-trip réseau local (loopback) + ack broker.
-- **Latence E2E** : horodatage producteur → horodatage réception consommateur.
-- **Pas de batching** : chaque message est un round-trip indépendant.
-- **Percentiles** calculés sur l'ensemble des latences triées après le run
-  (pas de HDR Histogram).
-- **Multi-run** (`runs > 1`) : répète N fois le scénario, calcule moyenne ± écart-type
-  sur les p50/p99/p99.9 pour évaluer la stabilité.
-- **Mode parallèle** (`producerCount > 1`) : N threads producteurs concurrents,
-  chacun avec sa propre connexion. Latences fusionnées avant calcul des percentiles.
-  Le débit affiché est le débit agrégé.
-- **Environnement** : les deux brokers partagent la même JVM et le même CPU —
-  les chiffres mesurent le comportement embedded, pas un cluster de production.
+### Modèle concurrent (identique pour Artemis et Pulsar)
+
+```
+Thread producer                Thread consumer (daemon)
+──────────────────             ────────────────────────
+consumeAsync(n, recvNs) ──────► démarre, écoute FIFO/seq
+t0 = nanoTime()
+for i in [0, n):
+  sendNs[i], pub[i] = sendAndRecord(payload)
+  if i % 100 == 0: émet partial
+    ← recvNs[i] lu (best-effort, race intentionnelle)
+sendElapsed = nanoTime() - t0
+recvFuture.get(60s) ──────────► complète recvNs[]
+e2e[i] = recvNs[i] - sendNs[i]
+```
+
+- **Artemis** : corrélation par position FIFO (`recvNs[position]`) — ordre garanti single-producer
+- **Pulsar** : corrélation par seqno (`recvNs[parseInt(messageKey)]`) — clé = index d'envoi
+- La phase de warmup (`drain()`) purge la queue avant la mesure
+
+### Calcul des métriques
+
+| Métrique | Formule |
+|----------|---------|
+| **Latence publish** | `nanoTime` avant/après `send()` synchrone et bloquant |
+| **Latence E2E** | `recvNs[i] - sendNs[i]`, capturé **avant** `acknowledge()` |
+| **Percentile p** | `sorted[ceil(n × p) - 1]` (formule inclusive) |
+| **Débit** | `n / sendElapsed` (wall-clock de la boucle send, pas somme des latences) |
+| **MB/s (sweep)** | `throughputMsgSec × payloadBytes / 1 048 576` |
+| **Stddev inter-runs** | `√(Σ(xi - x̄)² / (N-1))` — correction de Bessel |
+| **E2E partiel** | collecte `recvNs[i] > 0` pendant le streaming (race acceptable) |
+
+### Limites connues
+
+- Les deux brokers partagent la même JVM et le même CPU → chiffres relatifs, pas production
+- Durabilité désactivée dans ce POC (journal/BK tmpdir, fsync off) → throughput ≠ config durable
+- `producerCount > 1` désactive la mesure E2E (corrélation producer↔consumer impossible en parallèle)
+- Pulsar : le premier run est plus lent (warm-up Netty + ledger BookKeeper)
