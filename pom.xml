@@ -194,6 +194,10 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <!-- Pulsar 4.x accède à sun.management.ManagementFactoryHelper (JDK interne) -->
+          <jvmArguments>--add-opens java.management/sun.management=ALL-UNNAMED</jvmArguments>
+        </configuration>
       </plugin>
 
     </plugins>

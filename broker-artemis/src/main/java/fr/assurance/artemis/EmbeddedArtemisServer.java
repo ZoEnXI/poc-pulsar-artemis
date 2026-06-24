@@ -43,8 +43,6 @@ public class EmbeddedArtemisServer implements AutoCloseable {
         log.info("Artemis embedded started on port {} (journal: {})", port, journalDir);
     }
 
-    public int getPort() { return port; }
-
     public String getBrokerUrl() { return "tcp://localhost:" + port; }
 
     public boolean isPersistent() { return true; }

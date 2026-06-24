@@ -5,8 +5,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class PulsarBenchmarkClient implements AutoCloseable {
 
@@ -15,22 +17,45 @@ public class PulsarBenchmarkClient implements AutoCloseable {
     private static final String SUB   = "benchmark-sub";
 
     private final PulsarClient client;
+    private final boolean ownsClient;
     private final Producer<byte[]> producer;
     private final Consumer<byte[]> consumer;
 
+    /** Crée et possède son propre PulsarClient (health check, sweep legacy). */
     public PulsarBenchmarkClient(String brokerUrl) throws PulsarClientException {
         this(brokerUrl, false);
     }
 
-    /** @param producerOnly si true, aucun consumer — pour les producers parallèles */
+    /** Crée et possède son propre PulsarClient. */
     public PulsarBenchmarkClient(String brokerUrl, boolean producerOnly) throws PulsarClientException {
-        client = PulsarClient.builder().serviceUrl(brokerUrl).build();
+        this(PulsarClient.builder().serviceUrl(brokerUrl).build(), producerOnly, true);
+    }
 
+    /**
+     * Utilise un PulsarClient existant (singleton) — ne le ferme PAS dans close().
+     * Permet de réutiliser le pool Netty et les connexions TCP entre les runs.
+     */
+    public PulsarBenchmarkClient(PulsarClient client, boolean producerOnly) throws PulsarClientException {
+        this(client, producerOnly, false);
+    }
+
+    private PulsarBenchmarkClient(PulsarClient client, boolean producerOnly, boolean ownsClient)
+            throws PulsarClientException {
+        this.client = client;
+        this.ownsClient = ownsClient;
+
+        // maxPendingMessages(1) : force 1 message en vol à la fois.
+        // Sans ça, le producer Pulsar pipeline jusqu'à 1000 asyncAddEntry BK simultanés.
+        // Sur 5 runs × 2200 msgs, le bookie (unique, embedded) accumule ~10 000 pending
+        // → ETOOMANYREQUESTS. Avec 1, il ne peut jamais y en avoir plus d'1 en file.
+        // Effet positif pour le bench latence : on mesure la latence d'un seul message,
+        // pas le débit pipeliné.
         producer = client.newProducer()
                 .topic(TOPIC)
                 .enableBatching(false)
+                .maxPendingMessages(1)
                 .blockIfQueueFull(true)
-                .sendTimeout(30, TimeUnit.SECONDS)
+                .sendTimeout(120, TimeUnit.SECONDS)
                 .create();
 
         if (!producerOnly) {
@@ -38,6 +63,13 @@ public class PulsarBenchmarkClient implements AutoCloseable {
                     .topic(TOPIC)
                     .subscriptionName(SUB)
                     .subscriptionType(SubscriptionType.Shared)
+                    // NonDurable = curseur en mémoire uniquement : ZERO cursor-write BK.
+                    // Sans ça, chaque consumer.acknowledge() déclenche un write async sur
+                    // le bookie embedded → ETOOMANYREQUESTS sur la sweep (8000+ acks).
+                    // La subscription disparaît automatiquement à la fermeture du consumer
+                    // → pas de backlog résiduel entre runs, unsubscribe() devient défensif.
+                    .subscriptionMode(SubscriptionMode.NonDurable)
+                    .subscriptionInitialPosition(SubscriptionInitialPosition.Latest)
                     .subscribe();
         } else {
             consumer = null;
@@ -84,7 +116,7 @@ public class PulsarBenchmarkClient implements AutoCloseable {
             int received = 0;
             try {
                 while (received < n) {
-                    Message<byte[]> m = consumer.receive(60, TimeUnit.SECONDS);
+                    Message<byte[]> m = consumer.receive(120, TimeUnit.SECONDS);
                     if (m == null) break;
                     long recvTime = System.nanoTime(); // capture AVANT acknowledge
                     consumer.acknowledge(m);
@@ -122,22 +154,55 @@ public class PulsarBenchmarkClient implements AutoCloseable {
         return new long[]{pubLat, Math.max(pubLat, e2eLat)};
     }
 
+    /**
+     * Fix #4 : drain via receiveAsync() au lieu du polling fixe à 100ms.
+     * receiveAsync() retourne dès qu'un message est disponible — le seul délai
+     * observé est le temps réseau réel, pas un timer arbitraire.
+     */
     public int drain(int expected, long timeoutMs) throws PulsarClientException {
         if (consumer == null) throw new IllegalStateException("drain() requires producerOnly=false");
+        if (expected <= 0) return 0;
         int count = 0;
         long deadline = System.currentTimeMillis() + timeoutMs;
-        while (count < expected && System.currentTimeMillis() < deadline) {
-            Message<byte[]> msg = consumer.receive(100, TimeUnit.MILLISECONDS);
-            if (msg != null) { consumer.acknowledge(msg); count++; }
+        while (count < expected) {
+            long remaining = deadline - System.currentTimeMillis();
+            if (remaining <= 0) break;
+            try {
+                Message<byte[]> msg = consumer.receiveAsync()
+                        .get(remaining, TimeUnit.MILLISECONDS);
+                consumer.acknowledgeAsync(msg);
+                count++;
+            } catch (TimeoutException e) {
+                break;
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof PulsarClientException pce) throw pce;
+                break;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
         return count;
     }
 
+    /**
+     * Fix #1 : unsubscribe() supprime le curseur côté broker avant de fermer le consumer.
+     * Les messages non-ack ne seront plus redelivrés au run suivant.
+     * Fix #3 : client.close() uniquement si ce client possède la connexion (ownsClient).
+     */
     @Override
     public void close() throws PulsarClientException {
-        try { producer.close(); } finally {
-            try { if (consumer != null) consumer.close(); } finally {
-                client.close();
+        try {
+            producer.close();
+        } finally {
+            try {
+                if (consumer != null) {
+                    try { consumer.unsubscribe(); } catch (PulsarClientException ignored) {}
+                    consumer.close();
+                }
+            } finally {
+                if (ownsClient) client.close();
             }
         }
     }

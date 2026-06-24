@@ -16,7 +16,7 @@ services:
       retries: 12
 
   pulsar:
-    image: apachepulsar/pulsar:4.0.0
+    image: apachepulsar/pulsar:4.2.2
     command: bin/pulsar standalone --no-functions-worker
     ports:
       - "6650:6650"     # Binary protocol

@@ -14,9 +14,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Controller
 public class BenchmarkController {
+
+    private static final Logger log = LoggerFactory.getLogger(BenchmarkController.class);
 
     private final BenchmarkService service;
     private final ObjectMapper mapper;
@@ -133,7 +137,12 @@ public class BenchmarkController {
             } catch (IllegalStateException e) {
                 try { emitter.send(SseEmitter.event().name("bench-error").data(e.getMessage())); } catch (Exception ignored) {}
                 emitter.complete();
-            } catch (Exception e) { emitter.completeWithError(e); }
+            } catch (Exception e) {
+                log.error("Sweep failed", e);
+                try { emitter.send(SseEmitter.event().name("bench-error")
+                        .data(e.getClass().getSimpleName() + ": " + e.getMessage())); } catch (Exception ignored) {}
+                emitter.complete();
+            }
         });
 
         return emitter;

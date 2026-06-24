@@ -10,6 +10,7 @@ import org.apache.pulsar.zookeeper.LocalBookkeeperEnsemble;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.util.Optional;
@@ -37,15 +38,19 @@ public class EmbeddedPulsarServer implements AutoCloseable {
         int bkPort  = freePort();
         brokerPort  = freePort();
 
-        log.info("Starting ZooKeeper + BookKeeper on zk={} bk={}", zkPort, bkPort);
-        bkEnsemble = new LocalBookkeeperEnsemble(1, zkPort, () -> bkPort);
+        // Répertoires fixes dans le temp système — purgés à chaque démarrage (clearOldData=true)
+        // pour éviter l'accumulation de ledgers BK résiduels entre sessions.
+        String tmpBase = System.getProperty("java.io.tmpdir") + File.separator + "poc-pulsar-embedded";
+        log.info("Starting ZooKeeper + BookKeeper on zk={} bk={} dataDir={}", zkPort, bkPort, tmpBase);
+        bkEnsemble = new LocalBookkeeperEnsemble(1, zkPort, bkPort,
+                tmpBase + "-zk", tmpBase + "-bk", true);
         bkEnsemble.start();
 
         ServiceConfiguration conf = new ServiceConfiguration();
         conf.setClusterName("standalone");
         conf.setAdvertisedAddress("localhost");
-        conf.setZookeeperServers("127.0.0.1:" + zkPort);
-        conf.setConfigurationStoreServers("127.0.0.1:" + zkPort);
+        conf.setMetadataStoreUrl("zk:127.0.0.1:" + zkPort);
+        conf.setConfigurationMetadataStoreUrl("zk:127.0.0.1:" + zkPort);
         conf.setBrokerServicePort(Optional.of(brokerPort));
         conf.setWebServicePort(Optional.of(freePort()));
 
@@ -57,6 +62,14 @@ public class EmbeddedPulsarServer implements AutoCloseable {
         // Désactiver les composants non nécessaires pour le POC
         conf.setFunctionsWorkerEnabled(false);
         conf.setTransactionCoordinatorEnabled(false);
+
+        // Réduire la pression sur le bookie unique : limiter la fréquence des cursor-writes
+        // (chaque consumer.acknowledge() déclenche un cursor-write async → saturation sans ça)
+        conf.setManagedLedgerDefaultMarkDeleteRateLimit(1000.0);
+        // Éviter les rollovers fréquents qui ré-allouent des ledgers BK
+        conf.setManagedLedgerMaxEntriesPerLedger(200_000);
+        // Désactiver le throttle côté client (le bookie embedded régule lui-même)
+        conf.setBookkeeperClientThrottleValue(0);
 
         conf.setAllowAutoTopicCreation(true);
         conf.setAllowAutoTopicCreationType(
@@ -114,8 +127,14 @@ public class EmbeddedPulsarServer implements AutoCloseable {
             if (!nsRes.namespaceExists(defaultNs)) {
                 var p = new Policies();
                 p.replication_clusters = Set.of("standalone");
+                // Fix #2 : supprimer les messages dès que tous les cursors ont acquitté
+                // (0, 0) = pas de retention par taille ni par temps → GC BK immédiat
+                p.retention_policies = new RetentionPolicies(0, 0);
+                // Filet de sécurité : expirer les messages après 5min même si la
+                // subscription a disparu sans tout acquitter (evite les ledgers orphelins)
+                p.message_ttl_in_seconds = 300;
                 nsRes.createPolicies(defaultNs, p);
-                log.info("Namespace 'public/default' created");
+                log.info("Namespace 'public/default' created (retention=0, ttl=300s)");
             }
 
             var demoNs = NamespaceName.get("public", "demo");

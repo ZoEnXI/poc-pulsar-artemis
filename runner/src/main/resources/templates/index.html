@@ -4,173 +4,418 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>POC EDA Benchmark — Artemis vs Pulsar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #0f1117; color: #e2e8f0;
-      min-height: 100vh; padding: 2rem;
-      max-width: 1000px; margin: 0 auto;
+    :root {
+      --font-main: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      
+      /* Colors */
+      --bg-main: #090d16;
+      --bg-card: rgba(20, 26, 42, 0.65);
+      --bg-card-hover: rgba(27, 36, 58, 0.8);
+      --border-card: rgba(38, 48, 77, 0.5);
+      --border-card-hover: rgba(99, 102, 241, 0.4);
+      
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --primary-gradient: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
+      
+      --artemis-color: #f59e0b;
+      --artemis-bg: rgba(245, 158, 11, 0.08);
+      --artemis-border: rgba(245, 158, 11, 0.25);
+      --artemis-gradient: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+
+      --pulsar-color: #06b6d4;
+      --pulsar-bg: rgba(6, 182, 212, 0.08);
+      --pulsar-border: rgba(6, 182, 212, 0.25);
+      --pulsar-gradient: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%);
+
+      --success-color: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.08);
+      --success-border: rgba(16, 185, 129, 0.25);
+      
+      --danger-color: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.08);
+      --danger-border: rgba(239, 68, 68, 0.25);
+      
+      --warning-color: #fbbf24;
+      --warning-bg: rgba(251, 191, 36, 0.1);
+      --warning-border: rgba(251, 191, 36, 0.25);
+      
+      --tooltip-bg: #0f172a;
+      --tooltip-border: #1e293b;
+      --tooltip-text: #e2e8f0;
+      
+      --transition-fast: 0.15s ease;
+      --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
-    h1 { font-size: 1.4rem; font-weight: 700; color: #f8fafc; margin-bottom: 1.5rem; letter-spacing: -.02em; }
-    h1 span { color: #6366f1; }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: var(--font-main);
+      background: var(--bg-main);
+      color: var(--text-primary);
+      min-height: 100vh;
+      padding: 2.5rem 1.5rem;
+      max-width: 1100px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    /* Scrollbar custom */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-main); }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    /* Tooltips */
+    .tooltip-container {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      cursor: help;
+      margin-left: 0.35rem;
+      color: var(--text-muted);
+      transition: color var(--transition-fast);
+      vertical-align: middle;
+    }
+    .tooltip-container:hover { color: var(--text-secondary); }
+    .tooltip-icon {
+      font-size: 0.72rem;
+      background: rgba(255, 255, 255, 0.05);
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      font-style: normal;
+      font-weight: 700;
+    }
+    .tooltip-content {
+      visibility: hidden;
+      opacity: 0;
+      width: 280px;
+      background-color: var(--tooltip-bg);
+      color: var(--tooltip-text);
+      text-align: left;
+      border-radius: 8px;
+      padding: 0.8rem 1rem;
+      border: 1px solid var(--tooltip-border);
+      position: absolute;
+      z-index: 100;
+      bottom: 130%;
+      left: 50%;
+      transform: translateX(-50%) translateY(5px);
+      transition: opacity var(--transition-normal), transform var(--transition-normal), visibility var(--transition-normal);
+      font-size: 0.76rem;
+      line-height: 1.42;
+      font-weight: 400;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
+      pointer-events: none;
+    }
+    .tooltip-content::after {
+      content: "";
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      margin-left: -5px;
+      border-width: 5px;
+      border-style: solid;
+      border-color: var(--tooltip-border) transparent transparent transparent;
+    }
+    .tooltip-container:hover .tooltip-content {
+      visibility: visible;
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    h1 { font-size: 1.6rem; font-weight: 800; color: var(--text-primary); margin-bottom: 0; letter-spacing: -.025em; }
+    h1 span { background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
     /* tabs */
-    .tabs { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 1px solid #2d3148; }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.75rem; border-bottom: 1px solid var(--border-card); padding-bottom: 2px; }
     .tab-btn { background: none; border: none; border-bottom: 2px solid transparent;
-               color: #6b7280; padding: .6rem 1.15rem; font-size: .88rem; font-weight: 600;
-               cursor: pointer; margin-bottom: -1px; transition: color .15s, border-color .15s; }
-    .tab-btn:hover  { color: #9ca3af; }
-    .tab-btn.active { color: #e2e8f0; border-bottom-color: #6366f1; }
-    .pulsar-tag { color: #22d3ee; font-size: .68rem; vertical-align: super; margin-left: .2rem; }
+               color: var(--text-secondary); padding: 0.75rem 1.25rem; font-size: 0.9rem; font-weight: 600;
+               cursor: pointer; transition: all var(--transition-fast); border-top-left-radius: 6px; border-top-right-radius: 6px; }
+    .tab-btn:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.03); }
+    .tab-btn.active { color: var(--text-primary); border-bottom-color: var(--primary); background: rgba(99, 102, 241, 0.05); }
+    .pulsar-tag { color: var(--pulsar-color); font-size: .68rem; vertical-align: super; margin-left: .25rem; font-weight: 800; }
 
     /* card */
-    .card { background: #1e2130; border: 1px solid #2d3148; border-radius: 12px;
-            padding: 1.4rem 1.5rem; margin-bottom: 1.25rem; }
-    .card-header { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.1rem; }
-    .card-header h2 { font-size: .75rem; text-transform: uppercase; letter-spacing: .09em; color: #6b7280; flex: 1; }
-    .card-header .note { font-size: .72rem; color: #4b5563; }
+    .card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 16px;
+            padding: 1.6rem 1.8rem; margin-bottom: 1.5rem; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: border-color var(--transition-normal), box-shadow var(--transition-normal); }
+    .card:hover { border-color: rgba(255, 255, 255, 0.08); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2); }
+    .card-header { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .card-header h2 { font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-secondary); flex: 1; min-width: 200px; }
+    .card-header .note { font-size: .75rem; color: var(--text-muted); }
 
     /* badges */
-    .badge { display: inline-flex; align-items: center; gap: .4rem;
-             padding: .22rem .7rem; border-radius: 99px; font-size: .76rem; font-weight: 600;
-             border: 1px solid transparent; }
+    .badge { display: inline-flex; align-items: center; gap: .45rem;
+             padding: 0.28rem 0.85rem; border-radius: 99px; font-size: 0.78rem; font-weight: 600;
+             border: 1px solid transparent; transition: all var(--transition-fast); }
     .badge-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-    .badge.unknown  { background: #1e2130; border-color: #3b4060; color: #6b7280; }
-    .badge.checking { background: #1e2130; border-color: #6366f1; color: #a5b4fc; }
-    .badge.checking .badge-dot { animation: pulse 1s infinite; }
-    .badge.ready    { background: #052e16; border-color: #166534; color: #4ade80; }
-    .badge.error    { background: #3b1515; border-color: #7f1d1d; color: #fca5a5; }
-    .badge.info     { background: #1e1b4b; border-color: #3730a3; color: #a5b4fc; font-size: .7rem; }
-    .badge.yes      { background: #052e16; border-color: #166534; color: #4ade80; }
-    .badge.no       { background: #3b1515; border-color: #7f1d1d; color: #fca5a5; }
-    .badge.partial  { background: #2d1f07; border-color: #92400e; color: #fbbf24; }
-    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
+    .badge.unknown  { background: rgba(255, 255, 255, 0.03); border-color: var(--border-card); color: var(--text-secondary); }
+    .badge.checking { background: rgba(99, 102, 241, 0.05); border-color: var(--primary); color: #a5b4fc; }
+    .badge.checking .badge-dot { animation: pulse 1.2s infinite; }
+    .badge.ready    { background: var(--success-bg); border-color: var(--success-border); color: var(--success-color); }
+    .badge.error    { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-color); }
+    .badge.info     { background: rgba(99, 102, 241, 0.08); border-color: rgba(99, 102, 241, 0.25); color: #a5b4fc; font-size: .75rem; }
+    .badge.yes      { background: var(--success-bg); border-color: var(--success-border); color: var(--success-color); }
+    .badge.no       { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-color); }
+    .badge.partial  { background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-color); }
+    @keyframes pulse { 0%,100%{opacity:1; transform: scale(1);} 50%{opacity:.3; transform: scale(0.85);} }
 
-    .status-row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+    .status-row { display: flex; gap: .85rem; align-items: center; flex-wrap: wrap; }
+
+    /* Tab transitions */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .tab-content {
+      animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
 
     /* params */
-    .params-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px,1fr));
-                   gap: .9rem; margin-bottom: 1rem; }
-    .field label { display: block; font-size: .73rem; color: #9ca3af; margin-bottom: .3rem; }
-    .field input[type="number"] { width: 100%; background: #0f1117; border: 1px solid #3b4060;
-                                  border-radius: 6px; color: #e2e8f0; padding: .4rem .6rem; font-size: .88rem; }
-    .field input[type="number"]:focus { outline: none; border-color: #6366f1; }
-    .field-hint { font-size: .68rem; color: #4b5563; margin-top: .2rem; }
-    .brokers-row { display: flex; gap: 1.25rem; margin-top: .15rem; align-items: center; }
-    .broker-check { display: flex; align-items: center; gap: .45rem; cursor: pointer; font-size: .88rem; }
-    .broker-check input[type="checkbox"] { width: 15px; height: 15px; accent-color: #6366f1; cursor: pointer; }
+    .params-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                   gap: 1.2rem; margin-bottom: 1.25rem; }
+    .field label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; }
+    
+    /* Clean inputs styling */
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type="number"] {
+      -moz-appearance: textfield;
+      width: 100%; background: #070a10; border: 1px solid var(--border-card);
+      border-radius: 8px; color: var(--text-primary); padding: 0.5rem 0.75rem; font-size: 0.9rem;
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    }
+    input[type="number"]:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
+    .field-hint { font-size: .72rem; color: var(--text-muted); margin-top: 0.3rem; line-height: 1.3; }
+    
+    /* Interactive Checkboxes */
+    .brokers-row { display: flex; gap: 0.8rem; margin-top: .15rem; align-items: center; flex-wrap: wrap; }
+    .broker-check { display: flex; align-items: center; gap: .55rem; cursor: pointer; font-size: .88rem;
+                    padding: 0.45rem 0.95rem; border-radius: 8px; background: rgba(255, 255, 255, 0.02);
+                    border: 1px solid var(--border-card); transition: all var(--transition-fast); }
+    .broker-check:hover { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.15); }
+    .broker-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
+    .broker-check:has(input[type="checkbox"]:checked) {
+      background: rgba(99, 102, 241, 0.06);
+      border-color: var(--primary);
+      box-shadow: 0 0 12px rgba(99, 102, 241, 0.12);
+    }
+    .broker-check:has(#chk-artemis:checked) {
+      background: rgba(245, 158, 11, 0.06);
+      border-color: rgba(245, 158, 11, 0.4);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.12);
+    }
+    .broker-check:has(#chk-pulsar:checked) {
+      background: rgba(6, 182, 212, 0.06);
+      border-color: rgba(6, 182, 212, 0.4);
+      box-shadow: 0 0 12px rgba(6, 182, 212, 0.12);
+    }
 
     /* buttons */
-    .btn-row { display: flex; gap: .75rem; flex-wrap: wrap; }
-    .btn { border: none; border-radius: 8px; padding: .55rem 1.4rem; font-size: .88rem;
-           font-weight: 600; cursor: pointer; transition: background .15s, opacity .15s; }
-    .btn:disabled { opacity: .4; cursor: not-allowed; }
-    .btn-primary   { background: #6366f1; color: #fff; }
-    .btn-primary:hover:not(:disabled)   { background: #4f46e5; }
-    .btn-secondary { background: #2d3148; color: #e2e8f0; }
-    .btn-secondary:hover:not(:disabled) { background: #3b4060; }
-    .btn-danger    { background: #7f1d1d; color: #fca5a5; }
-    .btn-danger:hover:not(:disabled)    { background: #991b1b; }
-    .btn-pulsar { background: #0c3a4a; color: #22d3ee; border: 1px solid #164e63; }
-    .btn-pulsar:hover:not(:disabled)    { background: #164e63; }
+    .btn-row { display: flex; gap: .85rem; flex-wrap: wrap; }
+    .btn { border: none; border-radius: 10px; padding: 0.65rem 1.6rem; font-size: .88rem;
+           font-weight: 600; cursor: pointer; transition: all var(--transition-fast); display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
+    .btn:disabled { opacity: .35; cursor: not-allowed; transform: none !important; }
+    .btn-primary   { background: var(--primary-gradient); color: #fff; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25); }
+    .btn-primary:hover:not(:disabled)   { background: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35); }
+    .btn-primary:active:not(:disabled)  { transform: translateY(0); }
+    .btn-secondary { background: rgba(255, 255, 255, 0.04); color: var(--text-primary); border: 1px solid var(--border-card); }
+    .btn-secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); border-color: var(--text-secondary); }
+    .btn-danger    { background: var(--danger-bg); color: var(--danger-color); border: 1px solid var(--danger-border); }
+    .btn-danger:hover:not(:disabled)    { background: rgba(239, 68, 68, 0.15); border-color: var(--danger-color); }
+    .btn-pulsar { background: var(--pulsar-bg); color: var(--pulsar-color); border: 1px solid var(--pulsar-border); box-shadow: 0 4px 12px rgba(6, 182, 212, 0.1); }
+    .btn-pulsar:hover:not(:disabled)    { background: rgba(6, 182, 212, 0.15); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(6, 182, 212, 0.2); }
+    .btn-pulsar:active:not(:disabled)   { transform: translateY(0); }
 
-    /* progress */
+    /* progress layout */
     #progress-section { display: none; }
-    .broker-row { display: flex; align-items: center; gap: 1rem; margin-bottom: .6rem; }
-    .broker-label { width: 70px; font-size: .83rem; font-weight: 700; flex-shrink: 0; }
-    .broker-label.artemis { color: #f59e0b; }
-    .broker-label.pulsar  { color: #22d3ee; }
-    .progress-track { flex: 1; height: 9px; background: #2d3148; border-radius: 99px; overflow: hidden; }
-    .progress-fill  { height: 100%; border-radius: 99px; width: 0%; transition: width .25s ease; }
-    .progress-fill.artemis { background: #f59e0b; }
-    .progress-fill.pulsar  { background: #22d3ee; }
-    .progress-text  { width: 130px; font-size: .73rem; color: #6b7280; text-align: right; flex-shrink: 0; }
-    .live-metrics   { display: flex; gap: 1.5rem; margin: 0 0 .8rem 86px; }
-    .live-metric    { font-size: .72rem; color: #4b5563; }
-    .live-metric span { font-weight: 600; color: #9ca3af; }
-    .run-meta { font-size: .72rem; color: #4b5563; }
+    .broker-progress-card {
+      background: rgba(255, 255, 255, 0.015);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.25rem 1.4rem;
+      margin-bottom: 1rem;
+      transition: all var(--transition-fast);
+    }
+    .broker-progress-card:hover {
+      background: rgba(255, 255, 255, 0.025);
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+    .broker-row { display: flex; align-items: center; gap: 1.25rem; }
+    .broker-label { width: 75px; font-size: .88rem; font-weight: 700; flex-shrink: 0; }
+    .broker-label.artemis { color: var(--artemis-color); }
+    .broker-label.pulsar  { color: var(--pulsar-color); }
+    .progress-track { flex: 1; height: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 99px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.02); }
+    .progress-fill  { height: 100%; border-radius: 99px; width: 0%; transition: width var(--transition-normal); }
+    .progress-fill.artemis { background: var(--artemis-gradient); }
+    .progress-fill.pulsar  { background: var(--pulsar-gradient); }
+    .progress-text  { width: 120px; font-size: .78rem; color: var(--text-secondary); text-align: right; flex-shrink: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+    
+    .live-metrics   { display: flex; gap: 1.25rem 2rem; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px dashed rgba(255, 255, 255, 0.06); flex-wrap: wrap; }
+    .live-metric    { font-size: .78rem; color: var(--text-muted); }
+    .live-metric span { font-weight: 700; color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-left: 0.25rem; }
+    .run-meta { font-size: .75rem; color: var(--text-muted); font-weight: 500; }
+
+    /* stats card grid for DLT and features */
+    .stats-box {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-top: 1.25rem;
+    }
+    .stats-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      transition: all var(--transition-fast);
+    }
+    .stats-card:hover {
+      background: rgba(255, 255, 255, 0.035);
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+    .stats-card .stats-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 700;
+    }
+    .stats-card .stats-value {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
+    }
 
     /* results */
     #results-section { display: none; }
-    .results-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-    .results-table th { text-align: left; padding: .45rem .75rem; color: #6b7280; font-size: .72rem;
-                        text-transform: uppercase; letter-spacing: .07em; border-bottom: 1px solid #2d3148; }
-    .results-table td { padding: .55rem .75rem; border-bottom: 1px solid #1a1d2e; }
+    .charts-grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-top: 1.5rem; }
+    @media (min-width: 768px) { .charts-grid { grid-template-columns: 1fr 1fr; } }
+
+    .results-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    .results-table th { text-align: left; padding: .65rem .85rem; color: var(--text-muted); font-size: .74rem;
+                        text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--border-card); }
+    .results-table td { padding: .75rem .85rem; border-bottom: 1px solid rgba(255, 255, 255, 0.02); }
+    .results-table tr:hover td { background: rgba(255, 255, 255, 0.01); }
     .results-table tr:last-child td { border-bottom: none; }
-    .results-table td.metric     { color: #9ca3af; font-size: .8rem; }
-    .results-table td.sub-metric { color: #6b7280; font-size: .75rem; padding-left: 1.5rem; }
-    .results-table td.val-a { color: #f59e0b; font-weight: 600; font-variant-numeric: tabular-nums; }
-    .results-table td.val-p { color: #22d3ee; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .results-table td.metric     { color: var(--text-secondary); font-size: .82rem; font-weight: 500; }
+    .results-table td.sub-metric { color: var(--text-muted); font-size: .78rem; padding-left: 1.8rem; }
+    .results-table td.val-a { color: var(--artemis-color); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .results-table td.val-p { color: var(--pulsar-color); font-weight: 600; font-variant-numeric: tabular-nums; }
+    
+    /* Center-align comparison table values */
+    .results-table th:nth-child(2), .results-table td.val-a,
+    .results-table th:nth-child(3), .results-table td.val-p {
+      text-align: center;
+    }
+    .comp-table th.col-a, .comp-table td.val-a,
+    .comp-table th.col-p, .comp-table td.val-p {
+      text-align: center;
+    }
+    #sweep-table th:not(:first-child), #sweep-table td:not(:first-child) {
+      text-align: center;
+    }
+    
     .winner-badge { display: inline-block; font-size: .65rem; padding: .1rem .4rem; border-radius: 4px;
-                    margin-left: .4rem; font-weight: 700; vertical-align: middle; }
-    .winner-a { background: #422006; color: #f59e0b; }
-    .winner-p { background: #0c3a4a; color: #22d3ee; }
-    .section-sep td { padding: .2rem .75rem; background: #161927; font-size: .68rem;
-                      color: #4b5563; text-transform: uppercase; letter-spacing: .08em; }
-    .chart-wrapper { position: relative; height: 240px; margin-top: 1rem; }
-    .chart-title   { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
-                     color: #6b7280; margin-top: 1.25rem; }
+                    margin-left: .4rem; font-weight: 800; vertical-align: middle; }
+    .winner-a { background: var(--artemis-bg); color: var(--artemis-color); border: 1px solid var(--artemis-border); }
+    .winner-p { background: var(--pulsar-bg); color: var(--pulsar-color); border: 1px solid var(--pulsar-border); }
+    .section-sep td { padding: .45rem .85rem; background: rgba(255, 255, 255, 0.02); font-size: .72rem;
+                      color: var(--text-secondary); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; border-bottom: 1px solid var(--border-card); }
+    .chart-wrapper { position: relative; height: 260px; margin-top: 1rem; background: rgba(0,0,0,0.1); border-radius: 8px; padding: 0.5rem; }
+    .chart-title   { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em;
+                     color: var(--text-secondary); margin-top: 1.5rem; font-weight: 700; }
+                     
+    @media (max-width: 600px) {
+      .tooltip-content {
+        width: 220px;
+        font-size: 0.72rem;
+      }
+    }
 
     /* error */
-    .error-box { display: none; background: #3b1515; border: 1px solid #7f1d1d;
-                 color: #fca5a5; border-radius: 8px; padding: .7rem 1rem;
-                 font-size: .84rem; margin-bottom: 1rem; }
+    .error-box { display: none; background: var(--danger-bg); border: 1px solid var(--danger-border);
+                 color: var(--danger-color); border-radius: 10px; padding: 0.8rem 1.2rem;
+                 font-size: 0.85rem; margin-bottom: 1.5rem; line-height: 1.4; }
 
     /* feature demos */
-    .feature-intro  { font-size: .82rem; color: #9ca3af; margin-bottom: 1rem; line-height: 1.6; }
-    .feature-badges { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .9rem; }
-    code { background: #161927; border: 1px solid #2d3148; border-radius: 4px;
-           padding: .1rem .4rem; font-size: .8em; color: #a5b4fc; }
+    .feature-intro  { font-size: .86rem; color: var(--text-secondary); margin-bottom: 1.25rem; line-height: 1.6; }
+    .feature-badges { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
+    code { background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 5px;
+           padding: .15rem .45rem; font-size: .8em; color: #a5b4fc; font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace; }
 
     /* key-shared routing table */
-    .ks-grid { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: .84rem; }
-    .ks-grid th { padding: .4rem .75rem; color: #6b7280; font-size: .7rem; text-transform: uppercase;
-                  letter-spacing: .07em; border-bottom: 1px solid #2d3148; text-align: left; }
-    .ks-grid td { padding: .55rem .75rem; border-bottom: 1px solid #1a1d2e; }
+    .ks-grid { width: 100%; border-collapse: collapse; margin-top: 1.25rem; font-size: .86rem; }
+    .ks-grid th { padding: .65rem .85rem; color: var(--text-muted); font-size: .72rem; text-transform: uppercase;
+                  letter-spacing: .08em; border-bottom: 1px solid var(--border-card); text-align: left; }
+    .ks-grid td { padding: .75rem .85rem; border-bottom: 1px solid rgba(255, 255, 255, 0.02); }
     .ks-grid tr:last-child td { border-bottom: none; }
-    .cons-chip { display: inline-flex; align-items: center; gap: .35rem; padding: .18rem .6rem;
-                 border-radius: 99px; font-size: .75rem; font-weight: 600; }
-    .ks-ok  { color: #4ade80; }
-    .ks-err { color: #fca5a5; }
+    .cons-chip { display: inline-flex; align-items: center; gap: .35rem; padding: 0.22rem 0.75rem;
+                 border-radius: 99px; font-size: 0.76rem; font-weight: 600; border: 1px solid transparent; }
+    .ks-ok  { color: var(--success-color); font-weight: 700; }
+    .ks-err { color: var(--danger-color); font-weight: 700; }
 
     /* replay phases */
-    .replay-phases { margin-top: 1rem; display: flex; flex-direction: column; gap: .5rem; }
-    .phase-row { display: flex; align-items: center; gap: .9rem; padding: .5rem .75rem;
-                 border-radius: 8px; background: #161927; }
+    .replay-phases { margin-top: 1.25rem; display: flex; flex-direction: column; gap: 0.65rem; }
+    .phase-row { display: flex; align-items: center; gap: 1rem; padding: 0.65rem 0.9rem;
+                 border-radius: 10px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.04); transition: all var(--transition-fast); }
+    .phase-row:hover { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.06); }
     .phase-icon { width: 22px; height: 22px; border-radius: 50%; display: flex;
-                  align-items: center; justify-content: center; font-size: .75rem; flex-shrink: 0; }
-    .phase-icon.pending { border: 2px solid #3b4060; color: #3b4060; }
-    .phase-icon.active  { border: 2px solid #6366f1; color: #a5b4fc; animation: pulse 1s infinite; }
-    .phase-icon.done    { background: #052e16; border: 2px solid #166534; color: #4ade80; }
-    .phase-label    { font-size: .82rem; color: #9ca3af; flex: 1; min-width: 170px; }
+                  align-items: center; justify-content: center; font-size: .74rem; flex-shrink: 0; font-weight: 700; }
+    .phase-icon.pending { border: 2px solid var(--text-muted); color: var(--text-muted); }
+    .phase-icon.active  { border: 2px solid var(--primary); color: #a5b4fc; animation: pulse 1s infinite; }
+    .phase-icon.done    { background: var(--success-bg); border: 2px solid var(--success-border); color: var(--success-color); }
+    .phase-label    { font-size: .84rem; color: var(--text-secondary); flex: 1; min-width: 170px; font-weight: 500; }
     .phase-bar-wrap { flex: 1; }
-    .phase-bar-track { height: 7px; background: #2d3148; border-radius: 99px; overflow: hidden; }
-    .phase-bar-fill  { height: 100%; background: #22d3ee; border-radius: 99px;
-                       width: 0%; transition: width .3s ease; }
-    .phase-count    { font-size: .73rem; color: #6b7280; width: 80px; text-align: right; flex-shrink: 0; }
-    .replay-summary { margin-top: .75rem; font-size: .82rem; color: #9ca3af; line-height: 1.5; }
-    .replay-summary strong { color: #4ade80; }
+    .phase-bar-track { height: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 99px; overflow: hidden; }
+    .phase-bar-fill  { height: 100%; background: var(--pulsar-gradient); border-radius: 99px;
+                       width: 0%; transition: width var(--transition-normal); }
+    .phase-count    { font-size: .76rem; color: var(--text-secondary); width: 100px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .replay-summary { margin-top: 1rem; font-size: .86rem; color: var(--text-secondary); line-height: 1.6; padding: 0.8rem 1rem; background: rgba(255,255,255,0.01); border-radius: 8px; border-left: 3px solid var(--success-color); }
+    .replay-summary strong { color: var(--success-color); }
 
     /* comparatif */
-    .comp-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-    .comp-table th { padding: .5rem .9rem; color: #6b7280; font-size: .72rem; text-transform: uppercase;
-                     letter-spacing: .07em; border-bottom: 2px solid #2d3148; text-align: left; }
-    .comp-table th.col-a { color: #f59e0b; }
-    .comp-table th.col-p { color: #22d3ee; }
-    .comp-table td { padding: .55rem .9rem; border-bottom: 1px solid #1a1d2e; vertical-align: middle; }
+    .comp-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    .comp-table th { padding: .75rem 1rem; color: var(--text-muted); font-size: .72rem; text-transform: uppercase;
+                     letter-spacing: .08em; border-bottom: 2px solid var(--border-card); text-align: left; }
+    .comp-table th.col-a { color: var(--artemis-color); text-shadow: 0 0 10px rgba(245,158,11,0.15); }
+    .comp-table th.col-p { color: var(--pulsar-color); text-shadow: 0 0 10px rgba(6,182,212,0.15); }
+    .comp-table td { padding: 0.75rem 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.02); vertical-align: middle; }
+    .comp-table tr:hover td { background: rgba(255, 255, 255, 0.01); }
     .comp-table tr:last-child td { border-bottom: none; }
-    .comp-table td.feature-label { color: #9ca3af; font-size: .82rem; }
-    .comp-table td.val-a { color: #f59e0b; font-variant-numeric: tabular-nums; }
-    .comp-table td.val-p { color: #22d3ee; font-variant-numeric: tabular-nums; }
-    .comp-section td { padding: .25rem .9rem; background: #161927; font-size: .68rem;
-                       color: #4b5563; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+    .comp-table td.feature-label { color: var(--text-primary); font-size: .84rem; font-weight: 500; }
+    .comp-table td.val-a { color: var(--artemis-color); font-variant-numeric: tabular-nums; font-weight: 500; }
+    .comp-table td.val-p { color: var(--pulsar-color); font-variant-numeric: tabular-nums; font-weight: 500; }
+    .comp-section td { padding: .55rem 1rem; background: rgba(255, 255, 255, 0.03); font-size: .72rem;
+                       color: var(--text-secondary); text-transform: uppercase; letter-spacing: .08em; font-weight: 800; border-bottom: 1px solid var(--border-card); }
   </style>
 </head>
 <body>
 
-<div style="display:flex;align-items:baseline;gap:1rem;margin-bottom:1.5rem">
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:2rem;flex-wrap:wrap;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:1.5rem">
   <h1 style="margin-bottom:0">POC EDA Benchmark — <span>Artemis vs Pulsar</span></h1>
   <span id="mode-badge" class="badge unknown"><span class="badge-dot"></span>Mode : …</span>
 </div>
@@ -189,84 +434,164 @@
   <div id="bench-error-box" class="error-box"></div>
 
   <div class="card">
-    <div class="card-header"><h2>Initialisation &amp; durabilité</h2></div>
+    <div class="card-header">
+      <h2>
+        Initialisation &amp; durabilité
+        <span class="tooltip-container">
+          <span class="tooltip-icon">i</span>
+          <span class="tooltip-content">
+            <strong>Durabilité &amp; Stockage :</strong> Indique si les brokers sont actifs et configurés de manière persistante. Dans ce POC local, la persistance disque est activée mais le vidage forcé sur disque (fsync) est débrayé par défaut, offrant des débits élevés idéaux pour comparer l'efficacité CPU et réseau.
+          </span>
+        </span>
+      </h2>
+    </div>
     <div class="status-row">
       <div id="badge-artemis" class="badge unknown"><span class="badge-dot"></span>Artemis — inconnu</div>
       <div id="badge-pulsar"  class="badge unknown"><span class="badge-dot"></span>Pulsar — inconnu</div>
       <div style="flex:1"></div>
       <div id="dur-artemis" class="badge info" style="display:none"></div>
       <div id="dur-pulsar"  class="badge info" style="display:none"></div>
-      <button class="btn btn-secondary" id="btn-init">Vérifier les brokers</button>
+      <button class="btn btn-secondary" id="btn-init">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.283 8H18.5"/></svg>
+        Vérifier les brokers
+      </button>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header"><h2>Paramètres du test de charge</h2></div>
+    <div class="card-header">
+      <h2>Paramètres du test de charge</h2>
+    </div>
     <form id="bench-form">
       <div class="params-grid">
         <div class="field">
-          <label for="warmup">Warmup</label>
+          <label for="warmup">
+            Warmup
+            <span class="tooltip-container">
+              <span class="tooltip-icon">i</span>
+              <span class="tooltip-content">
+                <strong>Warmup (Chauffe) :</strong> Messages initiaux envoyés avant la mesure. Indispensable pour laisser à la JVM le temps de compiler à la volée (JIT), charger les classes en mémoire et initialiser les connexions réseau, garantissant des mesures de latence stables.
+              </span>
+            </span>
+          </label>
           <input type="number" id="warmup" value="200" min="0" max="5000"/>
           <div class="field-hint">messages de chauffe (non mesurés)</div>
         </div>
+        
         <div class="field">
-          <label for="messages">Messages mesurés</label>
+          <label for="messages">
+            Messages mesurés
+            <span class="tooltip-container">
+              <span class="tooltip-icon">i</span>
+              <span class="tooltip-content">
+                <strong>Messages mesurés :</strong> La taille de la fenêtre d'échantillonnage. Plus cette valeur est élevée, plus les mesures des centiles de latence (notamment p99 et p99.9) sont précises et représentatives, au coût d'un temps de test légèrement plus long.
+              </span>
+            </span>
+          </label>
           <input type="number" id="messages" value="2000" min="100" max="200000"/>
           <div class="field-hint">fenêtre de mesure par broker</div>
         </div>
+        
         <div class="field">
-          <label for="payloadSize">Taille payload (octets)</label>
+          <label for="payloadSize">
+            Taille payload (octets)
+            <span class="tooltip-container">
+              <span class="tooltip-icon">i</span>
+              <span class="tooltip-content">
+                <strong>Taille du payload :</strong> Volume de données additionnel injecté dans chaque message. Par défaut (0), le message transporte un objet JSON léger de type <em>ContratEvent</em> d'environ 150 octets. Augmenter cette taille permet d'évaluer le coût CPU de sérialisation et la bande passante réseau.
+              </span>
+            </span>
+          </label>
           <input type="number" id="payloadSize" value="0" min="0" max="65536"/>
           <div class="field-hint">0 = ContratEvent JSON (~150 B)</div>
         </div>
+        
         <div class="field">
-          <label for="producerCount">Producteurs parallèles</label>
+          <label for="producerCount">
+            Producteurs parallèles
+            <span class="tooltip-container">
+              <span class="tooltip-icon">i</span>
+              <span class="tooltip-content">
+                <strong>Producteurs parallèles :</strong> Nombre de clients écrivant simultanément. À 1, la mesure de bout en bout (E2E) est activée car chaque message est séquentiellement tracé. Au-delà de 1, le benchmark bascule en mode débit pur (publication seule) pour saturer le broker.
+              </span>
+            </span>
+          </label>
           <input type="number" id="producerCount" value="1" min="1" max="32"/>
           <div class="field-hint">1 = E2E activé · &gt;1 = pub only</div>
         </div>
+        
         <div class="field">
-          <label for="runs">Répétitions</label>
+          <label for="runs">
+            Répétitions
+            <span class="tooltip-container">
+              <span class="tooltip-icon">i</span>
+              <span class="tooltip-content">
+                <strong>Répétitions (Runs) :</strong> Nombre de fois que le test complet est joué successivement. Utile pour calculer l'écart-type (&sigma;) sur le p99 inter-runs, permettant de valider la régularité du broker et de détecter l'influence d'événements aléatoires comme les pauses GC.
+              </span>
+            </span>
+          </label>
           <input type="number" id="runs" value="1" min="1" max="5"/>
           <div class="field-hint">1 = live · 2-5 = p99 ± σ inter-runs</div>
         </div>
+        
         <div class="field">
-          <label>Brokers</label>
+          <label>
+            Brokers
+            <span class="tooltip-container">
+              <span class="tooltip-icon">i</span>
+              <span class="tooltip-content">
+                <strong>Choix des brokers :</strong> Sélectionnez le ou les brokers à soumettre au benchmark. Si les deux sont cochés, ils s'exécuteront séquentiellement et permettront une comparaison graphique côte-à-côte directe.
+              </span>
+            </span>
+          </label>
           <div class="brokers-row">
-            <label class="broker-check"><input type="checkbox" id="chk-artemis" checked/><span style="color:#f59e0b">Artemis</span></label>
-            <label class="broker-check"><input type="checkbox" id="chk-pulsar"  checked/><span style="color:#22d3ee">Pulsar</span></label>
+            <label class="broker-check"><input type="checkbox" id="chk-artemis" checked/><span style="color:var(--artemis-color); font-weight: 600;">Artemis</span></label>
+            <label class="broker-check"><input type="checkbox" id="chk-pulsar"  checked/><span style="color:var(--pulsar-color); font-weight: 600;">Pulsar</span></label>
           </div>
         </div>
       </div>
       <div class="btn-row">
-        <button type="submit" class="btn btn-primary" id="btn-run">Lancer le test</button>
-        <button type="button" class="btn btn-danger"  id="btn-stop" style="display:none">Annuler</button>
+        <button type="submit" class="btn btn-primary" id="btn-run">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Lancer le test
+        </button>
+        <button type="button" class="btn btn-danger"  id="btn-stop" style="display:none">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+          Annuler
+        </button>
       </div>
     </form>
   </div>
 
   <div class="card" id="progress-section">
     <div class="card-header"><h2>Progression</h2><span class="run-meta" id="run-meta"></span></div>
-    <div id="row-artemis" class="broker-row" style="display:none">
-      <span class="broker-label artemis">Artemis</span>
-      <div class="progress-track"><div class="progress-fill artemis" id="fill-artemis"></div></div>
-      <span class="progress-text" id="txt-artemis">—</span>
+    
+    <div id="container-artemis" class="broker-progress-card" style="display:none">
+      <div id="row-artemis" class="broker-row">
+        <span class="broker-label artemis">Artemis</span>
+        <div class="progress-track"><div class="progress-fill artemis" id="fill-artemis"></div></div>
+        <span class="progress-text" id="txt-artemis">—</span>
+      </div>
+      <div class="live-metrics" id="live-artemis" style="display:none">
+        <div class="live-metric">pub p50: <span id="lp50-artemis">—</span></div>
+        <div class="live-metric">pub p99: <span id="lp99-artemis">—</span></div>
+        <div class="live-metric">e2e p50: <span id="le50-artemis">—</span></div>
+        <div class="live-metric">débit: <span id="ltp-artemis">—</span></div>
+      </div>
     </div>
-    <div class="live-metrics" id="live-artemis" style="display:none">
-      <div class="live-metric">pub p50 <span id="lp50-artemis">—</span></div>
-      <div class="live-metric">pub p99 <span id="lp99-artemis">—</span></div>
-      <div class="live-metric">e2e p50 <span id="le50-artemis">—</span></div>
-      <div class="live-metric">débit <span id="ltp-artemis">—</span></div>
-    </div>
-    <div id="row-pulsar" class="broker-row" style="display:none">
-      <span class="broker-label pulsar">Pulsar</span>
-      <div class="progress-track"><div class="progress-fill pulsar" id="fill-pulsar"></div></div>
-      <span class="progress-text" id="txt-pulsar">—</span>
-    </div>
-    <div class="live-metrics" id="live-pulsar" style="display:none">
-      <div class="live-metric">pub p50 <span id="lp50-pulsar">—</span></div>
-      <div class="live-metric">pub p99 <span id="lp99-pulsar">—</span></div>
-      <div class="live-metric">e2e p50 <span id="le50-pulsar">—</span></div>
-      <div class="live-metric">débit <span id="ltp-pulsar">—</span></div>
+    
+    <div id="container-pulsar" class="broker-progress-card" style="display:none">
+      <div id="row-pulsar" class="broker-row">
+        <span class="broker-label pulsar">Pulsar</span>
+        <div class="progress-track"><div class="progress-fill pulsar" id="fill-pulsar"></div></div>
+        <span class="progress-text" id="txt-pulsar">—</span>
+      </div>
+      <div class="live-metrics" id="live-pulsar" style="display:none">
+        <div class="live-metric">pub p50: <span id="lp50-pulsar">—</span></div>
+        <div class="live-metric">pub p99: <span id="lp99-pulsar">—</span></div>
+        <div class="live-metric">e2e p50: <span id="le50-pulsar">—</span></div>
+        <div class="live-metric">débit: <span id="ltp-pulsar">—</span></div>
+      </div>
     </div>
   </div>
 
@@ -280,23 +605,33 @@
       </tr></thead>
       <tbody id="results-body"></tbody>
     </table>
-    <div id="chart-pub-wrap" style="display:none">
-      <div class="chart-title">Latence publication (→ ack broker)</div>
-      <div class="chart-wrapper"><canvas id="chart-pub"></canvas></div>
-    </div>
-    <div id="chart-e2e-wrap" style="display:none">
-      <div class="chart-title">Latence end-to-end (→ réception consommateur)</div>
-      <div class="chart-wrapper"><canvas id="chart-e2e"></canvas></div>
+    <div class="charts-grid">
+      <div id="chart-pub-wrap" style="display:none">
+        <div class="chart-title">Latence publication (→ ack broker)</div>
+        <div class="chart-wrapper"><canvas id="chart-pub"></canvas></div>
+      </div>
+      <div id="chart-e2e-wrap" style="display:none">
+        <div class="chart-title">Latence end-to-end (→ réception consommateur)</div>
+        <div class="chart-wrapper"><canvas id="chart-e2e"></canvas></div>
+      </div>
     </div>
   </div>
   <div class="card" id="sweep-card">
     <div class="card-header">
-      <h2>Payload Sweep — latence p99 vs taille (128 B → 64 KB)</h2>
+      <h2>
+        Payload Sweep — latence p99 vs taille (128 B → 64 KB)
+        <span class="tooltip-container">
+          <span class="tooltip-icon">i</span>
+          <span class="tooltip-content">
+            <strong>Payload Sweep :</strong> Lance automatiquement des tests de charge successifs avec des tailles de payload croissantes (128 B, 512 B, 1 KB, 4 KB, 16 KB, 64 KB). Ce test évalue la dégradation de la latence à mesure que la charge réseau et de sérialisation s'alourdit.
+          </span>
+        </span>
+      </h2>
       <span class="note">utilise warmup / messages / brokers ci-dessus</span>
     </div>
     <div class="btn-row" style="margin-bottom:.8rem">
       <button class="btn btn-secondary" id="btn-sweep">Lancer le sweep</button>
-      <span id="sweep-status" style="font-size:.78rem;color:#4b5563;align-self:center"></span>
+      <span id="sweep-status" style="font-size:.78rem;color:var(--text-muted);align-self:center"></span>
     </div>
     <div id="sweep-error" class="error-box"></div>
     <div id="sweep-results" style="display:none">
@@ -306,10 +641,10 @@
         <table class="results-table" id="sweep-table">
           <thead><tr>
             <th>Taille</th>
-            <th id="sth-artemis" style="color:#f59e0b;display:none">Artemis p99</th>
-            <th id="sth-pulsar"  style="color:#22d3ee;display:none">Pulsar p99</th>
-            <th id="sth-a-mb"    style="color:#f59e0b;opacity:.65;display:none">Artemis MB/s</th>
-            <th id="sth-p-mb"    style="color:#22d3ee;opacity:.65;display:none">Pulsar MB/s</th>
+            <th id="sth-artemis" style="color:var(--artemis-color);display:none">Artemis p99</th>
+            <th id="sth-pulsar"  style="color:var(--pulsar-color);display:none">Pulsar p99</th>
+            <th id="sth-a-mb"    style="color:var(--artemis-color);opacity:.65;display:none">Artemis MB/s</th>
+            <th id="sth-p-mb"    style="color:var(--pulsar-color);opacity:.65;display:none">Pulsar MB/s</th>
           </tr></thead>
           <tbody id="sweep-body"></tbody>
         </table>
@@ -326,19 +661,25 @@
   <!-- Key_Shared -->
   <div class="card">
     <div class="card-header">
-      <h2>Key_Shared — Routage garanti par clé métier</h2>
+      <h2>
+        Key_Shared — Routage garanti par clé métier
+        <span class="tooltip-container">
+          <span class="tooltip-icon">i</span>
+          <span class="tooltip-content">
+            <strong>Key_Shared (Pulsar) :</strong> Associe chaque clé de message (ex: CTR-A, CTR-B) à un consommateur unique via un anneau de hachage logique géré par le broker. Si un consommateur tombe en panne, le broker redirige ses clés de manière déterministe sans affecter les autres flux ni perturber l'ordre.
+          </span>
+        </span>
+      </h2>
       <span class="note">exclusif Pulsar</span>
     </div>
     <div class="feature-badges">
-      <span class="badge yes">✅ Pulsar — Key_Shared natif</span>
-      <span class="badge no">❌ Artemis — pas d'équivalent</span>
+      <span class="badge yes"><span class="badge-dot"></span>Pulsar — Key_Shared natif</span>
+      <span class="badge no"><span class="badge-dot"></span>Artemis — pas d'équivalent en queue concurrentielle</span>
     </div>
     <p class="feature-intro">
-      Avec <code>SubscriptionType.Key_Shared</code>, Pulsar garantit que tous les messages portant
-      la même clé (ex. un <em>contractId</em>) sont toujours livrés au <strong>même consumer</strong>,
-      même avec N consumers parallèles partageant la subscription. Chaque clé est
-      assignée à un consumer via un anneau de hachage géré par le broker.
-      Impossible à garantir nativement avec Artemis en mode concurrent.
+      Avec le mode de souscription <code>Key_Shared</code>, Apache Pulsar garantit que tous les messages portant
+      la même clé métier (par exemple, un identifiant de contrat d'assurance) sont toujours remis au <strong>même consommateur</strong>,
+      permettant un traitement ordonné en parallèle. Artemis ne dispose pas de routage par clé dynamique natif en mode concurrent (les Message Groups d'Artemis requièrent un partitionnement statique complexe).
     </p>
     <div class="params-grid" style="margin-bottom:.75rem">
       <div class="field">
@@ -347,56 +688,68 @@
         <div class="field-hint">6 clés distinctes (CTR-A à CTR-F)</div>
       </div>
       <div class="field">
-        <label for="ks-consumers">Consumers</label>
+        <label for="ks-consumers">Consumers parallèles</label>
         <input type="number" id="ks-consumers" value="3" min="2" max="4"/>
         <div class="field-hint">partagent la même subscription</div>
       </div>
     </div>
-    <div class="btn-row" style="margin-bottom:.6rem">
-      <button class="btn btn-pulsar" id="btn-ks">Démontrer Key_Shared</button>
+    <div class="btn-row" style="margin-bottom:1rem">
+      <button class="btn btn-pulsar" id="btn-ks">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Démontrer Key_Shared
+      </button>
     </div>
     <div id="ks-error" class="error-box"></div>
 
     <table class="ks-grid" id="ks-table" style="display:none">
       <thead><tr>
-        <th>Clé métier</th><th>Consumer assigné</th><th>Messages reçus</th><th>Cohérence</th>
+        <th>Clé métier</th><th>Consumer assigné</th><th>Messages reçus</th><th>Cohérence du routage</th>
       </tr></thead>
       <tbody id="ks-body"></tbody>
     </table>
-    <div id="ks-dist" style="display:none;margin-top:.9rem">
-      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;margin-bottom:.5rem">Distribution de charge</div>
+    <div id="ks-dist" style="display:none;margin-top:1.25rem">
+      <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-secondary);margin-bottom:.75rem;font-weight:700">Distribution de charge</div>
       <div id="ks-dist-bars"></div>
     </div>
-    <div id="ks-summary" style="display:none;margin-top:.75rem;font-size:.82rem"></div>
+    <div id="ks-summary" style="display:none;margin-top:1rem"></div>
   </div>
 
   <!-- Dead Letter Topic -->
   <div class="card">
     <div class="card-header">
-      <h2>Dead Letter Topic — protection contre les messages empoisonnés</h2>
+      <h2>
+        Dead Letter Topic — messages empoisonnés
+        <span class="tooltip-container">
+          <span class="tooltip-icon">i</span>
+          <span class="tooltip-content">
+            <strong>Dead Letter Topic (DLT) :</strong> Permet de décharger et isoler les messages posant problème (exceptions applicatives répétées) afin de ne pas bloquer les messages sains suivants. Le broker gère nativement le DLT par subscription.
+          </span>
+        </span>
+      </h2>
       <span class="note">exclusif Pulsar</span>
     </div>
     <div class="feature-badges">
-      <span class="badge yes">✅ Pulsar — DLT natif par subscription</span>
-      <span class="badge no">❌ Artemis — configuration broker manuelle</span>
+      <span class="badge yes"><span class="badge-dot"></span>Pulsar — DLT natif par subscription</span>
+      <span class="badge partial"><span class="badge-dot"></span>Artemis — configuration broker manuelle globale</span>
     </div>
     <p class="feature-intro">
-      Quand un consumer appelle <code>negativeAcknowledge()</code> sur un message répétitivement
-      (<code>maxRedeliverCount=2</code>), Pulsar le reroute automatiquement vers un
-      <strong>Dead Letter Topic</strong> dédié — sans perte de données.
-      Ici, 1 message sur 3 simule une erreur de traitement métier.
-      Les messages sains sont acquittés normalement ; les messages empoisonnés atterrissent dans le DLT
-      où un consumer dédié les récupère pour audit ou re-traitement manuel.
+      Si un traitement échoue et renvoie un acquittement négatif <code>negativeAcknowledge()</code> plusieurs fois de suite
+      (limite <code>maxRedeliverCount=2</code>), Pulsar déplace automatiquement le message empoisonné vers un
+      <strong>Dead Letter Topic (DLT)</strong> dédié. Le consommateur principal peut continuer son travail sans être bloqué.
+      Ci-dessous, 1 message sur 3 est simulé en erreur ; les messages normaux sont acquittés, les messages en erreur finissent dans le DLT.
     </p>
     <div class="params-grid" style="margin-bottom:.75rem">
       <div class="field">
         <label for="dlt-messages">Messages</label>
         <input type="number" id="dlt-messages" value="18" min="6" max="120"/>
-        <div class="field-hint">1/3 sont nackés → DLT</div>
+        <div class="field-hint">1/3 seront nackés → DLT</div>
       </div>
     </div>
-    <div class="btn-row" style="margin-bottom:.6rem">
-      <button class="btn btn-pulsar" id="btn-dlt">Démontrer Dead Letter Topic</button>
+    <div class="btn-row" style="margin-bottom:1rem">
+      <button class="btn btn-pulsar" id="btn-dlt">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        Démontrer Dead Letter Topic
+      </button>
     </div>
     <div id="dlt-error" class="error-box"></div>
 
@@ -409,22 +762,31 @@
       </div>
       <div class="phase-row">
         <div class="phase-icon pending" id="dlt-icon-PROCESSING">2</div>
-        <div class="phase-label">Traitement (ok + nacks)</div>
+        <div class="phase-label">Traitement (ok + nacks de tentative)</div>
         <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="dlt-bar-PROCESSING"></div></div></div>
         <div class="phase-count" id="dlt-cnt-PROCESSING">—</div>
       </div>
       <div class="phase-row">
         <div class="phase-icon pending" id="dlt-icon-DLT_DRAINING">3</div>
-        <div class="phase-label">Dead Letter Topic drain</div>
-        <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="dlt-bar-DLT_DRAINING" style="background:#f59e0b"></div></div></div>
+        <div class="phase-label">Récupération des messages du Dead Letter Topic</div>
+        <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="dlt-bar-DLT_DRAINING" style="background:var(--artemis-gradient)"></div></div></div>
         <div class="phase-count" id="dlt-cnt-DLT_DRAINING">—</div>
       </div>
     </div>
-    <div id="dlt-stats" style="display:none;margin-top:.8rem">
-      <div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.78rem">
-        <span style="color:#4ade80">✓ Acquittés&nbsp;: <strong id="dlt-stat-ok">—</strong></span>
-        <span style="color:#f59e0b">↩ Nacks&nbsp;: <strong id="dlt-stat-nacks">—</strong></span>
-        <span style="color:#22d3ee">☠ DLT reçus&nbsp;: <strong id="dlt-stat-dlt">—</strong></span>
+    <div id="dlt-stats" style="display:none;margin-top:1.25rem">
+      <div class="stats-box">
+        <div class="stats-card" style="border-left: 3px solid var(--success-color)">
+          <span class="stats-label">Acquittés (sains)</span>
+          <span class="stats-value" id="dlt-stat-ok">—</span>
+        </div>
+        <div class="stats-card" style="border-left: 3px solid var(--artemis-color)">
+          <span class="stats-label">Redélivrances (Nacks)</span>
+          <span class="stats-value" id="dlt-stat-nacks">—</span>
+        </div>
+        <div class="stats-card" style="border-left: 3px solid var(--pulsar-color)">
+          <span class="stats-label">Reçus dans le DLT</span>
+          <span class="stats-value" id="dlt-stat-dlt">—</span>
+        </div>
       </div>
     </div>
     <div class="replay-summary" id="dlt-summary" style="display:none"></div>
@@ -433,19 +795,26 @@
   <!-- Fan-out multi-subscription -->
   <div class="card">
     <div class="card-header">
-      <h2>Fan-out multi-subscription — broadcast indépendant</h2>
+      <h2>
+        Fan-out multi-subscription — broadcast indépendant
+        <span class="tooltip-container">
+          <span class="tooltip-icon">i</span>
+          <span class="tooltip-content">
+            <strong>Fan-out multi-subscription :</strong> Pulsar permet de brancher plusieurs abonnements (subscriptions) autonomes sur un seul topic. Chaque abonnement possède son propre pointeur (curseur) et lit l'intégralité du flux de manière totalement isolée.
+          </span>
+        </span>
+      </h2>
       <span class="note">exclusif Pulsar</span>
     </div>
     <div class="feature-badges">
-      <span class="badge yes">✅ Pulsar — curseurs indépendants par subscription</span>
-      <span class="badge partial">⚠ Artemis — topics séparés requis</span>
+      <span class="badge yes"><span class="badge-dot"></span>Pulsar — curseurs indépendants par subscription</span>
+      <span class="badge partial"><span class="badge-dot"></span>Artemis — queues distinctes et routage requis</span>
     </div>
     <p class="feature-intro">
-      Deux subscriptions de noms différents sur le <strong>même topic</strong> reçoivent chacune
-      l'intégralité du flux, indépendamment l'une de l'autre.
-      <code>audit-trail</code> et <code>analytics-engine</code> partagent le même topic source
-      sans coordination ni duplication de données.
-      Avec Artemis en mode queue, il faudrait deux queues distinctes et un routage applicatif.
+      Deux abonnements de noms distincts branchés sur le <strong>même topic physique</strong> reçoivent chacun
+      l'intégralité du flux de messages de façon 100% indépendante.
+      Ici, les microservices factices <code>audit-trail</code> et <code>analytics-engine</code> lisent en parallèle sans coordination
+      ni duplication de données sur le broker. Sur Artemis, cela nécessiterait de déclarer des files d'attente distinctes et de configurer du routage.
     </p>
     <div class="params-grid" style="margin-bottom:.75rem">
       <div class="field">
@@ -454,20 +823,23 @@
         <div class="field-hint">reçus × 2 (une fois par subscription)</div>
       </div>
     </div>
-    <div class="btn-row" style="margin-bottom:.6rem">
-      <button class="btn btn-pulsar" id="btn-fanout">Démontrer Fan-out</button>
+    <div class="btn-row" style="margin-bottom:1rem">
+      <button class="btn btn-pulsar" id="btn-fanout">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+        Démontrer Fan-out
+      </button>
     </div>
     <div id="fo-error" class="error-box"></div>
 
-    <div id="fo-progress" style="display:none;margin-top:.8rem">
-      <div class="broker-row" style="margin-bottom:.4rem">
-        <span class="broker-label pulsar" style="width:130px;font-size:.78rem">audit-trail</span>
+    <div id="fo-progress" style="display:none;margin-top:1.25rem">
+      <div class="broker-row" style="margin-bottom:.75rem">
+        <span class="broker-label pulsar" style="width:140px;font-size:.82rem">audit-trail</span>
         <div class="progress-track"><div class="progress-fill pulsar" id="fo-fill-1"></div></div>
         <span class="progress-text" id="fo-txt-1">—</span>
       </div>
       <div class="broker-row">
-        <span class="broker-label" style="width:130px;font-size:.78rem;color:#c4b5fd">analytics-engine</span>
-        <div class="progress-track"><div class="progress-fill" id="fo-fill-2" style="background:#c4b5fd"></div></div>
+        <span class="broker-label" style="width:140px;font-size:.82rem;color:#c4b5fd">analytics-engine</span>
+        <div class="progress-track"><div class="progress-fill" id="fo-fill-2" style="background:linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)"></div></div>
         <span class="progress-text" id="fo-txt-2">—</span>
       </div>
     </div>
@@ -477,19 +849,24 @@
   <!-- Message Replay -->
   <div class="card">
     <div class="card-header">
-      <h2>Message Replay — Relecture après acquittement</h2>
+      <h2>
+        Message Replay — Relecture après acquittement
+        <span class="tooltip-container">
+          <span class="tooltip-icon">i</span>
+          <span class="tooltip-content">
+            <strong>Message Replay :</strong> Grâce au stockage structuré d'Apache BookKeeper, Pulsar conserve l'historique physique des messages même s'ils sont acquittés, selon des règles de rétention. Les consommateurs peuvent repositionner leur curseur dans le passé.
+          </span>
+        </span>
+      </h2>
       <span class="note">exclusif Pulsar</span>
     </div>
     <div class="feature-badges">
-      <span class="badge yes">✅ Pulsar — seek(earliest) natif</span>
-      <span class="badge no">❌ Artemis — messages détruits après ack</span>
+      <span class="badge yes"><span class="badge-dot"></span>Pulsar — seek(earliest) natif</span>
+      <span class="badge no"><span class="badge-dot"></span>Artemis — messages détruits immédiatement après ack</span>
     </div>
     <p class="feature-intro">
-      Pulsar conserve les messages même après acquittement grâce à la <em>rétention configurable</em>
-      sur le namespace (<code>public/demo</code> configuré ici à 60 min / 100 MB).
-      Un consumer peut appeler <code>consumer.seek(MessageId.earliest)</code> pour rejouer
-      l'historique depuis le début — utile pour la reprise sur incident, la migration de données
-      ou le recalcul d'agrégats.
+      Pulsar conserve les messages dans un journal ordonné et persistant après acquittement grâce à la <em>rétention configurable</em>. Un consommateur peut appeler <code>consumer.seek(MessageId.earliest)</code>
+      pour relire le flux depuis le début du journal. C'est idéal pour recalculer des données (Event Sourcing), corriger un bug métier historique, ou rattraper un crash.
     </p>
     <div class="params-grid" style="margin-bottom:.75rem">
       <div class="field">
@@ -498,8 +875,11 @@
         <div class="field-hint">envoyés puis relus 2 fois</div>
       </div>
     </div>
-    <div class="btn-row" style="margin-bottom:.6rem">
-      <button class="btn btn-pulsar" id="btn-replay">Démontrer Message Replay</button>
+    <div class="btn-row" style="margin-bottom:1rem">
+      <button class="btn btn-pulsar" id="btn-replay">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z"/></svg>
+        Démontrer Message Replay
+      </button>
     </div>
     <div id="rp-error" class="error-box"></div>
 
@@ -512,19 +892,19 @@
       </div>
       <div class="phase-row">
         <div class="phase-icon pending" id="icon-CONSUMING">2</div>
-        <div class="phase-label">Consommation + acquittement</div>
+        <div class="phase-label">Consommation + acquittement standard</div>
         <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="bar-CONSUMING"></div></div></div>
         <div class="phase-count" id="cnt-CONSUMING">—</div>
       </div>
       <div class="phase-row">
         <div class="phase-icon pending" id="icon-SEEKING">3</div>
-        <div class="phase-label">seek(MessageId.earliest)</div>
-        <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="bar-SEEKING" style="background:#f59e0b"></div></div></div>
+        <div class="phase-label">seek(MessageId.earliest) — Repositionnement du curseur</div>
+        <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="bar-SEEKING" style="background:var(--artemis-gradient)"></div></div></div>
         <div class="phase-count" id="cnt-SEEKING">—</div>
       </div>
       <div class="phase-row">
         <div class="phase-icon pending" id="icon-REPLAYING">4</div>
-        <div class="phase-label">Replay (après ack complet)</div>
+        <div class="phase-label">Replay — Relecture des messages acquittés</div>
         <div class="phase-bar-wrap"><div class="phase-bar-track"><div class="phase-bar-fill" id="bar-REPLAYING"></div></div></div>
         <div class="phase-count" id="cnt-REPLAYING">—</div>
       </div>
@@ -545,99 +925,99 @@
     </div>
     <table class="comp-table">
       <thead><tr>
-        <th style="width:38%">Feature</th>
+        <th style="width:38%">Caractéristique</th>
         <th class="col-a" style="width:31%">ActiveMQ Artemis 2.36</th>
         <th class="col-p" style="width:31%">Apache Pulsar 4.2</th>
       </tr></thead>
       <tbody>
-        <tr class="comp-section"><td colspan="3">Résultats benchmark (lancez l'onglet Benchmark)</td></tr>
-        <tr style="font-size:.72rem;color:#6b7280">
-            <td class="feature-label" style="font-style:italic">Conditions du run</td>
-            <td class="val-a" id="cmp-a-params"><span style="color:#4b5563">—</span></td>
-            <td class="val-p" id="cmp-p-params"><span style="color:#4b5563">—</span></td></tr>
-        <tr><td class="feature-label">Latence pub p50</td>
-            <td class="val-a" id="cmp-a-p50"><span style="color:#4b5563">—</span></td>
-            <td class="val-p" id="cmp-p-p50"><span style="color:#4b5563">—</span></td></tr>
-        <tr><td class="feature-label">Latence pub p99</td>
-            <td class="val-a" id="cmp-a-p99"><span style="color:#4b5563">—</span></td>
-            <td class="val-p" id="cmp-p-p99"><span style="color:#4b5563">—</span></td></tr>
-        <tr><td class="feature-label">Latence pub p99.9</td>
-            <td class="val-a" id="cmp-a-p999"><span style="color:#4b5563">—</span></td>
-            <td class="val-p" id="cmp-p-p999"><span style="color:#4b5563">—</span></td></tr>
+        <tr class="comp-section"><td colspan="3">Résultats de performance du dernier Benchmark</td></tr>
+        <tr style="font-size:.74rem;color:var(--text-muted)">
+            <td class="feature-label" style="font-style:italic">Conditions de test</td>
+            <td class="val-a" id="cmp-a-params"><span style="color:var(--text-muted)">—</span></td>
+            <td class="val-p" id="cmp-p-params"><span style="color:var(--text-muted)">—</span></td></tr>
+        <tr><td class="feature-label">Latence publication p50</td>
+            <td class="val-a" id="cmp-a-p50"><span style="color:var(--text-muted)">—</span></td>
+            <td class="val-p" id="cmp-p-p50"><span style="color:var(--text-muted)">—</span></td></tr>
+        <tr><td class="feature-label">Latence publication p99</td>
+            <td class="val-a" id="cmp-a-p99"><span style="color:var(--text-muted)">—</span></td>
+            <td class="val-p" id="cmp-p-p99"><span style="color:var(--text-muted)">—</span></td></tr>
+        <tr><td class="feature-label">Latence publication p99.9</td>
+            <td class="val-a" id="cmp-a-p999"><span style="color:var(--text-muted)">—</span></td>
+            <td class="val-p" id="cmp-p-p999"><span style="color:var(--text-muted)">—</span></td></tr>
         <tr><td class="feature-label">Latence E2E p50</td>
-            <td class="val-a" id="cmp-a-e50"><span style="color:#4b5563">—</span></td>
-            <td class="val-p" id="cmp-p-e50"><span style="color:#4b5563">—</span></td></tr>
+            <td class="val-a" id="cmp-a-e50"><span style="color:var(--text-muted)">—</span></td>
+            <td class="val-p" id="cmp-p-e50"><span style="color:var(--text-muted)">—</span></td></tr>
         <tr><td class="feature-label">Latence E2E p99</td>
-            <td class="val-a" id="cmp-a-e99"><span style="color:#4b5563">—</span></td>
-            <td class="val-p" id="cmp-p-e99"><span style="color:#4b5563">—</span></td></tr>
+            <td class="val-a" id="cmp-a-e99"><span style="color:var(--text-muted)">—</span></td>
+            <td class="val-p" id="cmp-p-e99"><span style="color:var(--text-muted)">—</span></td></tr>
         <tr><td class="feature-label">Latence E2E p99.9</td>
-            <td class="val-a" id="cmp-a-e999"><span style="color:#4b5563">—</span></td>
-            <td class="val-p" id="cmp-p-e999"><span style="color:#4b5563">—</span></td></tr>
-        <tr><td class="feature-label">Débit max (msg/s)</td>
-            <td class="val-a" id="cmp-a-tp"><span style="color:#4b5563">—</span></td>
-            <td class="val-p" id="cmp-p-tp"><span style="color:#4b5563">—</span></td></tr>
+            <td class="val-a" id="cmp-a-e999"><span style="color:var(--text-muted)">—</span></td>
+            <td class="val-p" id="cmp-p-e999"><span style="color:var(--text-muted)">—</span></td></tr>
+        <tr><td class="feature-label">Débit maximum mesuré</td>
+            <td class="val-a" id="cmp-a-tp"><span style="color:var(--text-muted)">—</span></td>
+            <td class="val-p" id="cmp-p-tp"><span style="color:var(--text-muted)">—</span></td></tr>
 
-        <tr class="comp-section"><td colspan="3">Types de subscription</td></tr>
-        <tr><td class="feature-label">Queue concurrente</td>
-            <td><span class="badge yes">✅ natif</span></td>
-            <td><span class="badge yes">✅ Shared</span></td></tr>
-        <tr><td class="feature-label">Fan-out (broadcast)</td>
-            <td><span class="badge yes">✅ multicast / topics</span></td>
-            <td><span class="badge yes">✅ multi-subscription</span></td></tr>
-        <tr><td class="feature-label">Routage garanti par clé</td>
-            <td><span class="badge no">❌ non garanti en concurrent</span></td>
-            <td><span class="badge yes">✅ Key_Shared</span></td></tr>
-        <tr><td class="feature-label">Failover automatique</td>
-            <td><span class="badge partial">⚠ via HA pair</span></td>
-            <td><span class="badge yes">✅ Failover subscription</span></td></tr>
+        <tr class="comp-section"><td colspan="3">Abonnements &amp; Routages</td></tr>
+        <tr><td class="feature-label">Souscription concurrente (Queues)</td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Natif</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Mode Shared</span></td></tr>
+        <tr><td class="feature-label">Diffusion (Broadcast / Fan-out)</td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Multicast / Topics</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Multi-subscription</span></td></tr>
+        <tr><td class="feature-label">Routage ordonné par clé métier</td>
+            <td><span class="badge no"><span class="badge-dot"></span>Non garanti (concurrent)</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Key_Shared natif</span></td></tr>
+        <tr><td class="feature-label">Secours &amp; Bascule (Failover)</td>
+            <td><span class="badge partial"><span class="badge-dot"></span>HA Pair (Actif/Passif)</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Failover subscription</span></td></tr>
 
-        <tr class="comp-section"><td colspan="3">Persistance &amp; replay</td></tr>
+        <tr class="comp-section"><td colspan="3">Persistance, Rétention &amp; Rejeux</td></tr>
         <tr><td class="feature-label">Rétention après acquittement</td>
-            <td><span class="badge no">❌</span></td>
-            <td><span class="badge yes">✅ configurable (time/size)</span></td></tr>
-        <tr><td class="feature-label">Replay / seek()</td>
-            <td><span class="badge no">❌</span></td>
-            <td><span class="badge yes">✅ seek(MessageId / timestamp)</span></td></tr>
-        <tr><td class="feature-label">Tiered storage</td>
-            <td><span class="badge no">❌</span></td>
-            <td><span class="badge yes">✅ S3, GCS, Azure Blob</span></td></tr>
+            <td><span class="badge no"><span class="badge-dot"></span>Non supporté</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Configurable (NS / Topic)</span></td></tr>
+        <tr><td class="feature-label">Rejeu de messages / seek()</td>
+            <td><span class="badge no"><span class="badge-dot"></span>Non supporté</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>seek(Id / Timestamp)</span></td></tr>
+        <tr><td class="feature-label">Stockage froid (Tiered Storage)</td>
+            <td><span class="badge no"><span class="badge-dot"></span>Non supporté</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Natif (S3, GCS, Azure)</span></td></tr>
 
-        <tr class="comp-section"><td colspan="3">Opérationnel &amp; écosystème</td></tr>
+        <tr class="comp-section"><td colspan="3">Fonctionnalités Système &amp; Écosystème</td></tr>
         <tr><td class="feature-label">Dead Letter Topic natif</td>
-            <td><span class="badge partial">⚠ via config broker</span></td>
-            <td><span class="badge yes">✅ par subscription</span></td></tr>
-        <tr><td class="feature-label">Livraison différée</td>
-            <td><span class="badge no">❌</span></td>
-            <td><span class="badge yes">✅ deliverAfter() / deliverAt()</span></td></tr>
-        <tr><td class="feature-label">Schema Registry</td>
-            <td><span class="badge no">❌</span></td>
-            <td><span class="badge yes">✅ Avro, JSON, Protobuf</span></td></tr>
+            <td><span class="badge partial"><span class="badge-dot"></span>Config broker globale</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Par subscription</span></td></tr>
+        <tr><td class="feature-label">Livraison différée (Delayed Delivery)</td>
+            <td><span class="badge no"><span class="badge-dot"></span>Non supporté</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>deliverAfter / deliverAt</span></td></tr>
+        <tr><td class="feature-label">Registre de schémas (Schema Registry)</td>
+            <td><span class="badge no"><span class="badge-dot"></span>Non supporté</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Avro, JSON, Protobuf</span></td></tr>
         <tr><td class="feature-label">Multi-tenancy natif</td>
-            <td><span class="badge no">❌</span></td>
-            <td><span class="badge yes">✅ tenant / namespace / topic</span></td></tr>
-        <tr><td class="feature-label">Transactions</td>
-            <td><span class="badge yes">✅ JMS / AMQP</span></td>
-            <td><span class="badge yes">✅ API transactions (4.x)</span></td></tr>
-        <tr><td class="feature-label">Géo-réplication</td>
-            <td><span class="badge no">❌</span></td>
-            <td><span class="badge yes">✅ natif</span></td></tr>
-        <tr><td class="feature-label">Compatibilité JMS</td>
-            <td><span class="badge yes">✅ natif</span></td>
-            <td><span class="badge partial">⚠ via adaptateur</span></td></tr>
+            <td><span class="badge no"><span class="badge-dot"></span>Non supporté</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Tenant / NS / Topic</span></td></tr>
+        <tr><td class="feature-label">Transactions distribuées</td>
+            <td><span class="badge yes"><span class="badge-dot"></span>JMS / AMQP (2PC)</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>API native (4.x)</span></td></tr>
+        <tr><td class="feature-label">Géo-réplication multi-régions</td>
+            <td><span class="badge no"><span class="badge-dot"></span>Non supporté</span></td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Natif (sans proxy)</span></td></tr>
+        <tr><td class="feature-label">Compatibilité JMS / Standards</td>
+            <td><span class="badge yes"><span class="badge-dot"></span>Natif (JMS 2.0)</span></td>
+            <td><span class="badge partial"><span class="badge-dot"></span>Via adaptateur client</span></td></tr>
         <tr><td class="feature-label">Courbe d'apprentissage</td>
-            <td><span class="badge yes">✅ faible — JMS standard</span></td>
-            <td><span class="badge partial">⚠ modèle propre à maîtriser</span></td></tr>
+            <td><span class="badge yes"><span class="badge-dot"></span>Faible (Standard JMS)</span></td>
+            <td><span class="badge partial"><span class="badge-dot"></span>Modèle (NS, Bookies)</span></td></tr>
 
-        <tr class="comp-section"><td colspan="3">Conditions de durabilité (ce POC)</td></tr>
+        <tr class="comp-section"><td colspan="3">Configuration &amp; Durabilité du POC</td></tr>
         <tr>
-          <td class="feature-label">Stockage messages</td>
-          <td class="val-a" style="font-size:.78rem;color:#6b7280">Journal tmpdir · fsync désactivé<br><em style="color:#4b5563">résultats valables en throughput relatif uniquement</em></td>
-          <td class="val-p" style="font-size:.78rem;color:#6b7280">BookKeeper tmpdir · fsync désactivé<br><em style="color:#4b5563">résultats valables en throughput relatif uniquement</em></td>
+          <td class="feature-label">Mécanisme de stockage local</td>
+          <td class="val-a" style="font-size:.78rem;color:var(--text-muted)">Journal tmpdir · fsync désactivé<br><em style="color:var(--text-muted)">latences comparables uniquement</em></td>
+          <td class="val-p" style="font-size:.78rem;color:var(--text-muted)">BookKeeper tmpdir · fsync désactivé<br><em style="color:var(--text-muted)">latences comparables uniquement</em></td>
         </tr>
         <tr>
-          <td class="feature-label">Durabilité prod.</td>
-          <td><span class="badge partial">⚠ journal durable (config)</span></td>
-          <td><span class="badge partial">⚠ Quorum BookKeeper (config)</span></td>
+          <td class="feature-label">Garanties en production</td>
+          <td><span class="badge partial"><span class="badge-dot"></span>Journal sync (config)</span></td>
+          <td><span class="badge partial"><span class="badge-dot"></span>Quorum BookKeeper (config)</span></td>
         </tr>
       </tbody>
     </table>
@@ -646,6 +1026,11 @@
 
 <script>
 (function () {
+  // Config globale Chart.js
+  if (typeof Chart !== 'undefined') {
+    Chart.defaults.font.family = "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    Chart.defaults.color = "#94a3b8";
+  }
 
   /* ── tab routing ──────────────────────────────────────────── */
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -729,8 +1114,10 @@
   function resetBench(incA, incP, meta) {
     errBox.style.display = 'none';
     progSec.style.display = 'block';
+    document.getElementById('container-artemis').style.display = incA ? 'block' : 'none';
     document.getElementById('row-artemis').style.display  = incA ? 'flex' : 'none';
     document.getElementById('live-artemis').style.display = incA ? 'flex' : 'none';
+    document.getElementById('container-pulsar').style.display  = incP ? 'block' : 'none';
     document.getElementById('row-pulsar').style.display   = incP ? 'flex' : 'none';
     document.getElementById('live-pulsar').style.display  = incP ? 'flex' : 'none';
     ['artemis','pulsar'].forEach(b => {
@@ -822,9 +1209,9 @@
   function mkDatasets(k50, k99, k999) {
     const a = bState['artemis'], p = bState['pulsar']; const ds = [];
     if (a?.done) ds.push({ label: 'Artemis', data: [a[k50], a[k99], a[k999]],
-      backgroundColor: 'rgba(245,158,11,.75)', borderColor: '#f59e0b', borderWidth: 1, borderRadius: 4 });
+      backgroundColor: 'rgba(245,158,11,0.35)', borderColor: '#f59e0b', borderWidth: 1.5, borderRadius: 6 });
     if (p?.done) ds.push({ label: 'Pulsar',  data: [p[k50], p[k99], p[k999]],
-      backgroundColor: 'rgba(34,211,238,.75)',  borderColor: '#22d3ee', borderWidth: 1, borderRadius: 4 });
+      backgroundColor: 'rgba(6,182,212,0.35)',  borderColor: '#06b6d4', borderWidth: 1.5, borderRadius: 6 });
     return ds;
   }
 
@@ -833,12 +1220,12 @@
       type: 'bar',
       data: { labels: ['p50', 'p99', 'p99.9'], datasets },
       options: { responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#9ca3af', font: { size: 12 } } },
+        plugins: { legend: { labels: { color: '#94a3b8', font: { size: 12, weight: '500' } } },
                    tooltip: { callbacks: { label: c => c.parsed.y != null ? `${c.dataset.label}: ${c.parsed.y.toFixed(2)} ms` : null } } },
         scales: {
-          x: { ticks: { color: '#6b7280' }, grid: { color: '#1a1d2e' } },
-          y: { ticks: { color: '#6b7280', callback: v => v + ' ms' }, grid: { color: '#2d3148' },
-               title: { display: true, text: 'latence (ms)', color: '#6b7280', font: { size: 11 } } },
+          x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y: { ticks: { color: '#64748b', callback: v => v + ' ms' }, grid: { color: 'rgba(255,255,255,0.04)' },
+               title: { display: true, text: 'latence (ms)', color: '#64748b', font: { size: 11, weight: '500' } } },
         },
       },
     });
@@ -987,12 +1374,12 @@
       const pct = total > 0 ? Math.round(cnt / total * 100) : 0;
       const col = CONS_COLORS[c % CONS_COLORS.length];
       ksBars.insertAdjacentHTML('beforeend', `
-        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.35rem">
-          <span style="width:82px;font-size:.78rem;color:${col};font-weight:600">Consumer ${c}</span>
-          <div style="flex:1;height:8px;background:#2d3148;border-radius:99px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.45rem">
+          <span style="width:85px;font-size:.78rem;color:${col};font-weight:700">Consumer ${c}</span>
+          <div style="flex:1;height:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.02);border-radius:99px;overflow:hidden">
             <div style="height:100%;width:${pct}%;background:${col};border-radius:99px;transition:width .3s"></div>
           </div>
-          <span style="width:64px;text-align:right;font-size:.72rem;color:#6b7280">${cnt} msgs</span>
+          <span style="width:70px;text-align:right;font-size:.74rem;color:var(--text-secondary);font-weight:600;font-variant-numeric:tabular-nums">${cnt} msgs</span>
         </div>`);
     }
   }
@@ -1113,22 +1500,22 @@
         datasets: [
           ...(incA ? [{
             label: 'Artemis p99', data: [], yAxisID: 'y',
-            borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.08)',
+            borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.04)',
             tension: .35, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2,
           }] : []),
           ...(incP ? [{
             label: 'Pulsar p99', data: [], yAxisID: 'y',
-            borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,.08)',
+            borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,.04)',
             tension: .35, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2,
           }] : []),
           ...(incA ? [{
             label: 'Artemis MB/s', data: [], yAxisID: 'y1',
-            borderColor: 'rgba(245,158,11,.45)', backgroundColor: 'transparent',
+            borderColor: 'rgba(245,158,11,.4)', backgroundColor: 'transparent',
             borderDash: [4, 3], tension: .35, pointRadius: 3, pointHoverRadius: 5, borderWidth: 1.5,
           }] : []),
           ...(incP ? [{
             label: 'Pulsar MB/s', data: [], yAxisID: 'y1',
-            borderColor: 'rgba(34,211,238,.45)', backgroundColor: 'transparent',
+            borderColor: 'rgba(6,182,212,.4)', backgroundColor: 'transparent',
             borderDash: [4, 3], tension: .35, pointRadius: 3, pointHoverRadius: 5, borderWidth: 1.5,
           }] : []),
         ],
@@ -1136,7 +1523,7 @@
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
-          legend: { labels: { color: '#9ca3af', font: { size: 12 } } },
+          legend: { labels: { color: '#94a3b8', font: { size: 12, weight: '500' } } },
           tooltip: { callbacks: { label: c => {
             if (c.parsed.y == null) return null;
             return c.dataset.yAxisID === 'y1'
@@ -1145,17 +1532,17 @@
           }}},
         },
         scales: {
-          x: { ticks: { color: '#6b7280' }, grid: { color: '#1a1d2e' } },
+          x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.04)' } },
           y: {
-            ticks: { color: '#6b7280', callback: v => v + ' ms' },
-            grid: { color: '#2d3148' },
-            title: { display: true, text: 'latence p99 (ms)', color: '#6b7280', font: { size: 11 } },
+            ticks: { color: '#64748b', callback: v => v + ' ms' },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+            title: { display: true, text: 'latence p99 (ms)', color: '#64748b', font: { size: 11, weight: '500' } },
           },
           y1: {
             position: 'right',
-            ticks: { color: '#4b5563', callback: v => v.toFixed(1) + ' MB/s' },
+            ticks: { color: '#64748b', callback: v => v.toFixed(1) + ' MB/s' },
             grid: { drawOnChartArea: false },
-            title: { display: true, text: 'débit (MB/s)', color: '#4b5563', font: { size: 10 } },
+            title: { display: true, text: 'débit (MB/s)', color: '#64748b', font: { size: 11, weight: '500' } },
           },
         },
       },

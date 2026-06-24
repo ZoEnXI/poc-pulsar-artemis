@@ -6,6 +6,9 @@ import fr.assurance.artemis.ArtemisBenchmarkClient;
 import fr.assurance.pulsar.PulsarBenchmarkClient;
 import fr.assurance.runner.domain.ContratEvent;
 import fr.assurance.runner.domain.ContratEvent.EventType;
+import jakarta.annotation.PreDestroy;
+import org.apache.pulsar.client.api.PulsarClient;
+import org.apache.pulsar.client.api.PulsarClientException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -34,11 +37,30 @@ public class BenchmarkService {
     // Mutex : un seul benchmark (streaming ou sweep) à la fois
     private final AtomicBoolean benchmarkRunning = new AtomicBoolean(false);
 
+    // Fix #3 : singleton PulsarClient — réutilise le pool Netty et la connexion TCP
+    // entre les runs plutôt que de recréer client + handshake à chaque run.
+    private volatile PulsarClient sharedPulsarClient;
+
     public BenchmarkService(BrokerProperties brokers) {
         this.brokers = brokers;
         this.mapper = new ObjectMapper()
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
                 .findAndRegisterModules();
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        PulsarClient c = sharedPulsarClient;
+        if (c != null) {
+            try { c.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private synchronized PulsarClient getPulsarClient() throws PulsarClientException {
+        if (sharedPulsarClient == null || sharedPulsarClient.isClosed()) {
+            sharedPulsarClient = PulsarClient.builder().serviceUrl(brokers.pulsarUrl()).build();
+        }
+        return sharedPulsarClient;
     }
 
     public boolean isRunning() { return benchmarkRunning.get(); }
@@ -206,6 +228,11 @@ public class BenchmarkService {
                 points.add(new SweepPoint(size, label, artP99, pulP99, artMbSec, pulMbSec));
                 cb.accept(new SweepProgress("POINT", si, SWEEP_SIZES.length, size, label,
                         artP99, pulP99, artMbSec, pulMbSec, List.copyOf(points)));
+
+                // Laisser le GC BK embedded purger les ledgers de cette étape avant la suivante.
+                // Sans ce délai, l'étape 4/4 (64 KB) démarre avec BK occupé à GC les 3 étapes
+                // précédentes → contention journal → write latency > sendTimeout.
+                if (params.pulsar() && si < SWEEP_SIZES.length - 1) Thread.sleep(1_000);
             }
 
             cb.accept(new SweepProgress("DONE", SWEEP_SIZES.length - 1, SWEEP_SIZES.length, 0, "",
@@ -239,7 +266,7 @@ public class BenchmarkService {
             }
             long sendElapsed = System.nanoTime() - t0;
 
-            long[] recvNs = recvFuture.get(60, TimeUnit.SECONDS);
+            long[] recvNs = recvFuture.get(120, TimeUnit.SECONDS);
             long[] e2e    = computeE2e(pub, sendNs, recvNs, n);
             return toMetrics(n, pub, e2e, sendElapsed);
         }
@@ -342,7 +369,7 @@ public class BenchmarkService {
     // les timestamps sendNs[i] et recvNs[i] corrélés par le seqno (= la key).
 
     private BenchmarkResult.BrokerMetrics benchmarkPulsar(byte[] payload, int warmup, int messages) throws Exception {
-        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(brokers.pulsarUrl())) {
+        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(getPulsarClient(), false)) {
             warmupPulsar(c, payload, warmup);
             int n = messages;
             long[] pub    = new long[n];
@@ -358,7 +385,7 @@ public class BenchmarkService {
             }
             long sendElapsed = System.nanoTime() - t0;
 
-            long[] recvNs = recvFuture.get(60, TimeUnit.SECONDS);
+            long[] recvNs = recvFuture.get(120, TimeUnit.SECONDS);
             long[] e2e    = computeE2e(pub, sendNs, recvNs, n);
             return toMetrics(n, pub, e2e, sendElapsed);
         }
@@ -377,7 +404,7 @@ public class BenchmarkService {
     private BenchmarkResult.BrokerMetrics benchmarkPulsarWithProgress(byte[] payload, BenchmarkParams p,
             int run, int totalRuns, Consumer<BenchmarkProgress> cb) throws Exception {
         int n = p.messages();
-        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(brokers.pulsarUrl())) {
+        try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(getPulsarClient(), false)) {
             warmupPulsar(c, payload, p.warmup());
             long[] pub    = new long[n];
             long[] sendNs = new long[n];
@@ -419,7 +446,10 @@ public class BenchmarkService {
             if (recvNs[i] > 0) {
                 long raw = recvNs[i] - sendNs[i];
                 if (raw < pub[i]) {
-                    log.warn("E2E[{}] < pubLat ({} < {} ns) — incohérence timestamp, fallback sur pubLat", i, raw, pub[i]);
+                    // En mode embedded, le broker dispatche au consumer avant de renvoyer
+                    // l'ACK au producer (même JVM) → recvNs < sendNs + pubLat est physiquement
+                    // normal. Fallback sur pubLat (borne inférieure correcte).
+                    log.debug("E2E[{}] < pubLat ({} < {} ns) — dispatch avant ack, fallback sur pubLat", i, raw, pub[i]);
                     e2e[i] = pub[i];
                 } else {
                     e2e[i] = raw;
@@ -446,7 +476,7 @@ public class BenchmarkService {
         int threads = p.producerCount(), perThread = p.messages() / threads, actual = perThread * threads;
         log.info("Pulsar par: {} × {} = {} msgs (run {}/{})", threads, perThread, actual, run, totalRuns);
 
-        try (PulsarBenchmarkClient wc = new PulsarBenchmarkClient(brokers.pulsarUrl())) {
+        try (PulsarBenchmarkClient wc = new PulsarBenchmarkClient(getPulsarClient(), false)) {
             warmupPulsar(wc, payload, p.warmup());
         }
 
@@ -460,7 +490,7 @@ public class BenchmarkService {
         for (int t = 0; t < threads; t++) {
             final int tid = t;
             pool.submit(() -> {
-                try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(brokers.pulsarUrl(), true)) {
+                try (PulsarBenchmarkClient c = new PulsarBenchmarkClient(getPulsarClient(), true)) {
                     for (int i = 0; i < perThread; i++) { tlat[tid][i] = c.sendAndMeasure(payload, "t" + tid + "k" + i); sent.incrementAndGet(); }
                 } catch (Exception e) { err.compareAndSet(null, e); } finally { done.countDown(); }
             });
@@ -471,7 +501,7 @@ public class BenchmarkService {
         if (err.get() != null) throw err.get();
 
         long elapsed = System.nanoTime() - t0;
-        try (PulsarBenchmarkClient dc = new PulsarBenchmarkClient(brokers.pulsarUrl())) { dc.drain(actual, 60_000); }
+        try (PulsarBenchmarkClient dc = new PulsarBenchmarkClient(getPulsarClient(), false)) { dc.drain(actual, 60_000); }
 
         long[] all = merge(tlat, threads, perThread);
         return toMetrics(actual, all, EMPTY, elapsed);
