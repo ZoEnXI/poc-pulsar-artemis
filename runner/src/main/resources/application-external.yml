@@ -1,0 +1,7 @@
+broker:
+  artemis:
+    url: tcp://localhost:61616
+    durability: "Artemis standalone (Docker) — durabilité selon config broker"
+  pulsar:
+    url: pulsar://localhost:6650
+    durability: "Pulsar standalone (Docker) — BookKeeper, durabilité selon config broker"
