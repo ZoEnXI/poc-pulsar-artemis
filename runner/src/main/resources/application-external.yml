@@ -4,4 +4,5 @@ broker:
     durability: "Artemis standalone (Docker) — durabilité selon config broker"
   pulsar:
     url: pulsar://localhost:6650
+    admin-url: http://localhost:8081
     durability: "Pulsar standalone (Docker) — BookKeeper, durabilité selon config broker"

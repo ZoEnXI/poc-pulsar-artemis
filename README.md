@@ -3,42 +3,64 @@
 Banc de mesure comparatif **Apache ActiveMQ Artemis / Apache Pulsar** dans un contexte
 d'architecture événementielle assurance (CNP / LBP).
 
-Les deux brokers démarrent **en-process** (embedded JVM, zéro Docker) grâce à
-`EmbeddedActiveMQ` et `LocalBookkeeperEnsemble`. Un runner Spring Boot expose une IHM
-Thymeleaf avec résultats en quasi-temps-réel via Server-Sent Events.
+Deux modes de démarrage :
+
+| Mode | Brokers | Usage |
+|------|---------|-------|
+| **Embedded** (défaut) | `EmbeddedActiveMQ` + `LocalBookkeeperEnsemble` in-process | Dev / CI — zéro dépendance externe |
+| **External** (profil `external`) | Artemis + Pulsar via Docker Compose | Mesures sur brokers réels, plus représentatives |
+
+Un runner Spring Boot expose une IHM Thymeleaf avec résultats en quasi-temps-réel via Server-Sent Events.
 
 ---
 
 ## Prérequis
 
-| Outil | Version |
-|-------|---------|
-| JDK   | 17+     |
-| Maven | 3.9+    |
-
-Aucun Docker, aucun broker externe, aucun Node.js.
+| Outil | Version | Requis pour |
+|-------|---------|-------------|
+| JDK   | 17+     | Toujours |
+| Maven | 3.9+    | Toujours |
+| Docker Desktop | 4.x+ | Mode external uniquement |
 
 ---
 
 ## Démarrage
 
+### Mode embedded (défaut)
+
 ```bash
 # Premier build (télécharge ~300 MB de dépendances Pulsar la première fois)
 mvn package -DskipTests
 
-# Lancer l'application
+# Lancer l'application — les deux brokers démarrent en-process
 mvn spring-boot:run
 ```
 
 Pulsar met **10 à 20 secondes** à initialiser (ZooKeeper + BookKeeper + broker).
 L'IHM est disponible dès que le log affiche `Pulsar embedded ready`.
 
+> **Note :** les répertoires temporaires BookKeeper (`poc-pulsar-embedded-zk` / `-bk` dans
+> `java.io.tmpdir`) sont **purgés automatiquement** à chaque démarrage (`clearOldData=true`).
+> Aucune accumulation de ledgers résiduels entre sessions.
+
+### Mode external (Docker)
+
+```bash
+# Démarrer Artemis + Pulsar standalone en Docker
+docker compose up -d
+
+# Attendre que les deux brokers soient healthy (≈ 30 s)
+docker compose ps
+
+# Lancer l'application en mode external
+mvn spring-boot:run -Dspring-boot.run.profiles=external
+```
+
+Les URLs des brokers sont configurées dans `runner/src/main/resources/application-external.yml`.
+
 ```
 http://localhost:8080/
 ```
-
-> **Note :** le premier appel à `/benchmark/health` envoie un vrai message à chaque
-> broker — comptez 30 à 60 s pour le premier round-trip Pulsar, normal ensuite.
 
 ---
 
@@ -155,31 +177,37 @@ compilation/packaging.
 ```
 poc-pulsar-artemis/
 ├── pom.xml                              # unique POM (Spring Boot 3.3.5, Java 17)
-├── SPRINTS.md                           # suivi des 4 sprints de correction
+├── docker-compose.yml                   # Artemis 2.36.0 + Pulsar 4.2.2 pour mode external
+├── PULSAR_PERF_FIXES.md                 # journal des correctifs perf Pulsar (10 fixes)
 ├── broker-artemis/src/main/java/…/artemis/
 │   ├── EmbeddedArtemisServer            # démarre EmbeddedActiveMQ sur port libre
 │   └── ArtemisBenchmarkClient           # prod/conso Core protocol, producerOnly
 │       # consumeAsync(n, long[] recvNs) : tableau externe pour E2E progressif
 ├── broker-pulsar/src/main/java/…/pulsar/
 │   ├── EmbeddedPulsarServer             # ZooKeeper + BookKeeper + PulsarService
-│   └── PulsarBenchmarkClient            # prod/conso Pulsar, producerOnly
+│   │   # clearOldData=true : purge les répertoires BK/ZK au démarrage
+│   │   # maxPendingMessages(1) : 1 seul BK add en vol → pas d'ETOOMANYREQUESTS
+│   └── PulsarBenchmarkClient            # prod/conso Pulsar, NonDurable subscription
 │       # consumeAsync(n, long[] recvNs) : idem
 └── runner/src/main/
     ├── java/…/runner/
-    │   ├── RunnerApplication            # démarre les deux serveurs comme beans Spring
+    │   ├── RunnerApplication            # @Profile("!external") = embedded, "external" = Docker
+    │   ├── BrokerProperties             # record URLs + labels durabilité (embedded vs external)
     │   ├── BenchmarkParams              # record paramètres (warmup, messages, …)
     │   ├── BenchmarkProgress            # record SSE (isFinalRun, e2e*, p99StddevMs)
     │   ├── BenchmarkResult              # record résultat final (legacy JSON)
     │   ├── SweepPoint / SweepProgress   # records SSE sweep (artemis/pulsarThroughputMbSec)
     │   ├── BenchmarkService             # orchestration : single + multi-run + sweep
     │   │   # modèle concurrent : consumeAsync() démarre avant la boucle send
-    │   │   # benchmarkArtemisWithProgress / benchmarkPulsarWithProgress : partials
-    │   │   # partialE2e() : E2E progressif pendant le streaming
+    │   │   # sleep 1 s entre étapes sweep Pulsar (GC BK embedded)
     │   ├── BenchmarkController          # REST + SSE + Thymeleaf + validateBenchParams()
     │   └── pulsar/
     │       ├── PulsarFeaturesController # 4 endpoints SSE démos Pulsar
     │       └── PulsarFeaturesService    # Key_Shared, Replay, DLT, Fan-out
-    └── resources/templates/index.html
+    └── resources/
+        ├── application.yml              # config commune (port 8080, log levels)
+        ├── application-external.yml     # URLs Artemis/Pulsar Docker (profil external)
+        └── templates/index.html
 ```
 
 ---
@@ -215,7 +243,7 @@ for i in [0, n):
   if i % 100 == 0: émet partial
     ← recvNs[i] lu (best-effort, race intentionnelle)
 sendElapsed = nanoTime() - t0
-recvFuture.get(60s) ──────────► complète recvNs[]
+recvFuture.get(120s) ─────────► complète recvNs[]
 e2e[i] = recvNs[i] - sendNs[i]
 ```
 
@@ -237,7 +265,8 @@ e2e[i] = recvNs[i] - sendNs[i]
 
 ### Limites connues
 
-- Les deux brokers partagent la même JVM et le même CPU → chiffres relatifs, pas production
-- Durabilité désactivée dans ce POC (journal/BK tmpdir, fsync off) → throughput ≠ config durable
+- Les deux brokers partagent la même JVM et le même CPU en mode embedded → chiffres relatifs, pas production
+- Durabilité désactivée en mode embedded (journal/BK tmpdir, fsync off) → throughput ≠ config durable
 - `producerCount > 1` désactive la mesure E2E (corrélation producer↔consumer impossible en parallèle)
-- Pulsar : le premier run est plus lent (warm-up Netty + ledger BookKeeper)
+- Pulsar embedded : CPU significativement plus élevé qu'Artemis sous charge concurrente (ZK + BK + broker = 3 couches dans la même JVM)
+- Pulsar : `maxPendingMessages(1)` mesure la latence d'un message unique, pas le débit pipeliné — intentionnel pour la comparaison

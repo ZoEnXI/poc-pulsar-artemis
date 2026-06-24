@@ -39,6 +39,7 @@ public class RunnerApplication {
                 "embedded",
                 artemisServer.getBrokerUrl(),
                 pulsarServer.getBrokerUrl(),
+                "",   // pas d'admin HTTP en embedded (namespace créé via API interne)
                 artemisServer.isPersistent() ? "journal (tmpdir, fsync off)" : "in-memory",
                 "BookKeeper (tmpdir, fsync off)");
     }
@@ -48,8 +49,10 @@ public class RunnerApplication {
     BrokerProperties externalBrokerProperties(
             @Value("${broker.artemis.url}") String artemisUrl,
             @Value("${broker.pulsar.url}") String pulsarUrl,
+            @Value("${broker.pulsar.admin-url}") String pulsarAdminUrl,
             @Value("${broker.artemis.durability}") String artemisDurability,
             @Value("${broker.pulsar.durability}") String pulsarDurability) {
-        return new BrokerProperties("external", artemisUrl, pulsarUrl, artemisDurability, pulsarDurability);
+        return new BrokerProperties("external", artemisUrl, pulsarUrl, pulsarAdminUrl,
+                artemisDurability, pulsarDurability);
     }
 }

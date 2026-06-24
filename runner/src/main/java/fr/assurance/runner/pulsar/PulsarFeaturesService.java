@@ -1,7 +1,11 @@
 package fr.assurance.runner.pulsar;
 
 import fr.assurance.runner.BrokerProperties;
+import jakarta.annotation.PostConstruct;
+import org.apache.pulsar.client.admin.PulsarAdmin;
+import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.*;
+import org.apache.pulsar.common.policies.data.RetentionPolicies;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,6 +29,28 @@ public class PulsarFeaturesService {
 
     public PulsarFeaturesService(BrokerProperties brokers) {
         this.brokers = brokers;
+    }
+
+    /**
+     * En mode external (Docker), le namespace public/demo n'existe pas par défaut.
+     * On le crée via PulsarAdmin HTTP avant la première démo.
+     * En mode embedded, le namespace est déjà initialisé par EmbeddedPulsarServer.
+     */
+    @PostConstruct
+    public void initDemoNamespace() {
+        String adminUrl = brokers.pulsarAdminUrl();
+        if (adminUrl == null || adminUrl.isBlank()) return;
+        try (PulsarAdmin admin = PulsarAdmin.builder().serviceHttpUrl(adminUrl).build()) {
+            try {
+                admin.namespaces().createNamespace("public/demo");
+                admin.namespaces().setRetention("public/demo", new RetentionPolicies(60, 100));
+                log.info("Namespace 'public/demo' créé via admin HTTP (mode external)");
+            } catch (PulsarAdminException.ConflictException ignored) {
+                log.debug("Namespace 'public/demo' existe déjà");
+            }
+        } catch (Exception e) {
+            log.warn("Impossible d'initialiser public/demo via admin HTTP : {}", e.getMessage());
+        }
     }
 
     private String uniqueTopic(String prefix) {
