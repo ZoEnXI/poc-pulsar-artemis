@@ -24,7 +24,6 @@ public class PulsarFeaturesService {
 
     private final BrokerProperties brokers;
 
-    // Mutex : une seule démo Pulsar à la fois pour isoler les mesures
     private final AtomicBoolean featureRunning = new AtomicBoolean(false);
 
     public PulsarFeaturesService(BrokerProperties brokers) {
@@ -58,7 +57,6 @@ public class PulsarFeaturesService {
                 + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 
-    // ── Key_Shared demo ───────────────────────────────────────────────────────
 
     public void demoKeyShared(int messages, int numConsumers,
                               Consumer<KeySharedProgress> onEvent) throws Exception {
